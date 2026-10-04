@@ -1,0 +1,16 @@
+{
+  "appName": "your-app",
+  "githubRepo": "your-org/your-app",
+  "iosBundleId": "com.example.yourapp",
+  "allowedSlackUserId": "U0123456789",
+  "releaseBranch": "release",
+  "otaChannel": "production",
+  "workflows": {
+    "ota": "ota-production.yml",
+    "testflight": "release-native.yml"
+  },
+  "models": {
+    "jev": "jev-1.13.0",
+    "openai": "gpt-6-luna"
+  }
+}

@@ -1,0 +1,30 @@
+{
+  "name": "blink",
+  "version": "1.0.0",
+  "scripts": {
+    "start": "tsx src/index.ts",
+    "dev": "tsx watch src/index.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "tsx --test test/*.test.ts"
+  },
+  "type": "module",
+  "private": true,
+  "dependencies": {
+    "@octokit/request-error": "^7.1.2",
+    "@octokit/rest": "^22.0.1",
+    "@slack/bolt": "^5.1.0",
+    "@typesafe-ai/sdk": "^0.6.0",
+    "eas-cli": "^24.8.0",
+    "openai": "^7.27.0"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.3",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "license": "MIT",
+  "description": "Ship an Expo app from Slack: merges, OTA updates and TestFlight releases, routed by Jev with an OpenAI fallback."
+}

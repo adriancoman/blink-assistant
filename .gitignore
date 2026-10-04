@@ -1,0 +1,11 @@
+node_modules/
+.idea/
+.repo/
+
+# Secrets: ignore every .env variant, keep the template
+.env
+.env.*
+!.env.example
+
+# Local settings (copy release-bot.config.example.json)
+release-bot.config.json
