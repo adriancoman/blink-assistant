@@ -47,7 +47,7 @@ export function describe(p: Project, action: Action): string {
         ? `Bump the version ${action.bumpFrom} → *${action.version}* on \`${branch}\` (and \`main\` via PR), then build iOS and upload it to TestFlight`
         : `Build iOS *${action.version}* from \`${branch}\` and upload it to TestFlight`;
     case "release_android":
-      return `Build Android from \`${branch}\` (a store .aab; upload it to Google Play yourself)`;
+      return `Build Android from \`${branch}\` and upload it to Google Play`;
     case "rollback_ota": {
       const to = action.to.kind === "update" ? `the previous update ${shortGroup(action.to.update)}` : "the code in the store build (no earlier update for this runtime)";
       return `Roll back *${channel}* from ${shortGroup(action.from)} to ${to}${action.resume ? ", and resume the paused channel so phones receive it" : ""}`;
@@ -129,9 +129,9 @@ async function run(p: Project, action: Action): Promise<string | ExecuteResult> 
     }
     case "release_android": {
       const ex = expoOf(p);
-      if (!ex.expo.workflows.android) throw new Error(`Android builds aren't set up for ${p.name}`);
+      if (!ex.expo.workflows.android) throw new Error(`Android releases aren't set up for ${p.name}`);
       const started = await runWorkflow(ex, ex.expo.workflows.android);
-      return { text: `Android build started from \`${ex.github.releaseBranch}\`. <${started.url}|View run>`, watch: started };
+      return { text: `Android build + Google Play upload started from \`${ex.github.releaseBranch}\`. <${started.url}|View run>`, watch: started };
     }
     case "rollback_ota": {
       const ex = expoOf(p);

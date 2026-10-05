@@ -26,7 +26,7 @@ Nothing with side effects runs without a **Confirm** click, whichever model prop
 | **Merge** | _merge main into release_, _main to release_ | Opens a PR and merges it if there are no conflicts. Otherwise it leaves the PR open and sends you the link. |
 | **OTA update** | _release an OTA_, _push an ota "fix the stars animation"_ | Publishes an iOS update from the release branch to the `production` channel. Quoted text becomes the update message. |
 | **TestFlight** | _release to TestFlight_, _ship 4.1.0 to TestFlight_ | Bumps the version if needed (see [Versioning](#versioning)), then builds iOS and uploads it to App Store Connect. |
-| **Android build** | _build Android_, _make an Android build_ | Runs the Android workflow on the release branch: a store `.aab` you upload to Google Play yourself. Only if `expo.workflows.android` is set. |
+| **Android release** | _release Android_, _build Android_ | Builds Android from the release branch and uploads it to Google Play (the track in `eas.json`'s `submit` profile). Only if `expo.workflows.android` is set. |
 | **Roll back the OTA** | _roll back the OTA_, _undo the last update_ | Republishes the previous production update with the same runtime, or rolls back to the code inside the store build. |
 | **Stop rollout** | _stop rollout_, _pause the OTA_ | Cancels a running OTA workflow before it publishes and pauses the `production` channel, so phones that don't have the update yet won't get it. |
 | **Resume rollout** | _resume rollout_ | Unpauses the `production` channel. |
@@ -76,7 +76,7 @@ Apple only accepts a build whose version is above the live App Store version **a
 - **A TypeSafe AI key** for Jev. Jev is in limited early access.
 - Per project, only for the capabilities you use:
   - **Merges:** GitHub access to the repo, through the `gh` CLI login or a token.
-  - **Releases (OTA, TestFlight, rollback, status):** an Expo app on EAS Build and EAS Update (with the `fingerprint` runtime policy and an OTA channel), an Expo access token, and the EAS workflows below in the app repo (the Android one is optional).
+  - **Releases (OTA, TestFlight, rollback, status):** an Expo app on EAS Build and EAS Update (with the `fingerprint` runtime policy and an OTA channel), an Expo access token, and the EAS workflows below in the app repo (the Android one is optional, and needs a Google Play service account key on EAS).
   - **Analytics questions:** a PostHog project and a personal API key.
 - **Optional:** an OpenAI key for the Ask OpenAI fallback.
 
@@ -157,10 +157,10 @@ jobs:
 </details>
 
 <details>
-<summary><code>.eas/workflows/build-android.yml</code> (optional, for <em>build Android</em>)</summary>
+<summary><code>.eas/workflows/build-android.yml</code> (optional, for <em>release Android</em>)</summary>
 
 ```yaml
-name: Build Android
+name: Release Android
 
 on:
   workflow_dispatch: {}
@@ -171,6 +171,14 @@ jobs:
     type: build
     params:
       platform: android
+      profile: production
+
+  android_submit:
+    name: Submit Android to Google Play
+    needs: [android_build]
+    type: submit
+    params:
+      build_id: ${{ needs.android_build.outputs.build_id }}
       profile: production
 ```
 </details>
@@ -368,7 +376,7 @@ npm test           # pure logic only; no credentials needed
 
 ## Limitations
 
-- **Android is build-only.** OTA updates and TestFlight are iOS; Android builds aren't uploaded to Google Play.
+- **OTA updates are iOS only.**
 - **No App Store submission.** EAS has no job for submitting a version to App Store review.
 - **Single user, in-memory state.** Threads, pending confirmations and run watches reset when the bot restarts.
 - **The bot only runs while `npm start` is running.** Host it somewhere always-on if you need that.

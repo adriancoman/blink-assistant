@@ -15,7 +15,7 @@ function capabilities(p: Project): string[] {
     if (p.expo.workflows.testflight) {
       lines.push(`• *release to TestFlight*${p.expo.versioning === "app-json" ? " (optionally with a version, e.g. _ship 1.1.0 to TestFlight_)" : ""}`);
     }
-    if (p.expo.workflows.android) lines.push(`• *build Android* (a store build to upload to Google Play)`);
+    if (p.expo.workflows.android) lines.push(`• *release Android* (build and upload to Google Play)`);
     lines.push(`• show *status*`);
   }
   if (p.posthog) lines.push(`• answer *analytics questions* with PostHog AI (e.g. _how many signups this week?_)`);

@@ -13,8 +13,8 @@ const app = (android: string | null): Project => ({
 });
 
 describe("help", () => {
-  it("lists Android builds only when the workflow is set", () => {
-    assert.match(help(app("android.yml")), /build Android/);
+  it("lists Android releases only when the workflow is set", () => {
+    assert.match(help(app("android.yml")), /release Android/);
     assert.doesNotMatch(help(app(null)), /Android/);
   });
 });
@@ -22,7 +22,7 @@ describe("help", () => {
 describe("status", () => {
   it("shows the version without assuming iOS", () => {
     const text = status(app("android.yml"), {
-      workflow: "Build Android",
+      workflow: "Release Android",
       status: "SUCCESS",
       startedAt: null,
       finishedAt: null,
@@ -31,6 +31,6 @@ describe("status", () => {
       version: "1.0.0",
       buildNumber: "7",
     });
-    assert.match(text, /\*Build Android\* succeeded · 1\.0\.0 \(build 7\)/);
+    assert.match(text, /\*Release Android\* succeeded · 1\.0\.0 \(build 7\)/);
   });
 });
