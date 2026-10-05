@@ -10,3 +10,7 @@ node_modules/
 # Local settings (copy release-bot.config.example.json)
 release-bot.config.json
 .repos/
+
+# Local tool folders
+.claude/
+.serena/
