@@ -15,6 +15,7 @@ function capabilities(p: Project): string[] {
     if (p.expo.workflows.testflight) {
       lines.push(`• *release to TestFlight*${p.expo.versioning === "app-json" ? " (optionally with a version, e.g. _ship 1.1.0 to TestFlight_)" : ""}`);
     }
+    if (p.expo.workflows.android) lines.push(`• *build Android* (a store build to upload to Google Play)`);
     lines.push(`• show *status*`);
   }
   if (p.posthog) lines.push(`• answer *analytics questions* with PostHog AI (e.g. _how many signups this week?_)`);
@@ -71,7 +72,7 @@ export const otaWhilePaused = (p: Project) =>
 
 export function status(p: Project, run: LastRun | null, paused = false) {
   if (!run) return `No builds yet.${paused ? pausedNote(p) : ""}`;
-  const version = run.version ? ` · iOS ${run.version}${run.buildNumber ? ` (build ${run.buildNumber})` : ""}` : "";
+  const version = run.version ? ` · ${run.version}${run.buildNumber ? ` (build ${run.buildNumber})` : ""}` : "";
   const failedAt = run.failedSteps.length ? ` at *${run.failedSteps.join(", ")}*` : "";
   const timing = !run.startedAt
     ? ""

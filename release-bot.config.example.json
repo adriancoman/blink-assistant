@@ -23,7 +23,8 @@
         "otaChannel": "production",
         "workflows": {
           "ota": "ota-production.yml",
-          "testflight": "release-native.yml"
+          "testflight": "release-native.yml",
+          "android": "build-android.yml"
         },
         "tokenEnv": "EXPO_TOKEN",
         "versioning": "app-json"

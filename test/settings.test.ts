@@ -22,7 +22,7 @@ describe("parseConfig", () => {
     assert.deepEqual(p.expo, {
       iosBundleId: "com.acme.myapp",
       otaChannel: "production",
-      workflows: { ota: "ota-production.yml", testflight: "release-native.yml" },
+      workflows: { ota: "ota-production.yml", testflight: "release-native.yml", android: null },
       token: "expo",
       versioning: "app-json",
       repoDir: ".repos/myapp",
@@ -51,11 +51,11 @@ describe("parseConfig", () => {
     const [p] = parseConfig(
       {
         allowedSlackUserId: "U1",
-        projects: [{ ...myapp, expo: { iosBundleId: "x", workflows: { ota: null }, tokenEnv: "EXPO_TOKEN_OTHER", versioning: "none" } }],
+        projects: [{ ...myapp, expo: { iosBundleId: "x", workflows: { ota: null, android: "build-android.yml" }, tokenEnv: "EXPO_TOKEN_OTHER", versioning: "none" } }],
       },
       env,
     ).projects;
-    assert.deepEqual(p.expo?.workflows, { ota: null, testflight: "release-native.yml" });
+    assert.deepEqual(p.expo?.workflows, { ota: null, testflight: "release-native.yml", android: "build-android.yml" });
     assert.equal(p.expo?.token, "other");
     assert.equal(p.expo?.versioning, "none");
   });

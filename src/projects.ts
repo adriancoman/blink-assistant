@@ -34,6 +34,7 @@ const SUPPORTS: Record<string, (p: Project) => boolean> = {
   merge: (p) => Boolean(p.github),
   release_ota: (p) => Boolean(p.github && p.expo?.workflows.ota),
   release_testflight: (p) => Boolean(p.github && p.expo?.workflows.testflight),
+  release_android: (p) => Boolean(p.github && p.expo?.workflows.android),
   rollback_ota: (p) => Boolean(p.github && p.expo),
   stop_rollout: (p) => Boolean(p.github && p.expo),
   resume_rollout: (p) => Boolean(p.github && p.expo),

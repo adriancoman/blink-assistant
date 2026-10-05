@@ -66,7 +66,7 @@ describe("pickByCapability", () => {
   const app: Project = {
     ...project("myapp", "MyApp"),
     github: { owner: "a", repo: "myapp", releaseBranch: "release" },
-    expo: { iosBundleId: "x", otaChannel: "production", workflows: { ota: "ota.yml", testflight: "tf.yml" }, token: "t", versioning: "app-json", repoDir: "r" },
+    expo: { iosBundleId: "x", otaChannel: "production", workflows: { ota: "ota.yml", testflight: "tf.yml", android: null }, token: "t", versioning: "app-json", repoDir: "r" },
   };
   const gems: Project = {
     ...project("pmgems", "PMGems"),
@@ -78,6 +78,12 @@ describe("pickByCapability", () => {
   it("sends a release to the only project with Expo", () => {
     assert.equal(pickByCapability(all, "release_testflight", null), app);
     assert.equal(pickByCapability(all, "status", null), app);
+  });
+
+  it("only sends an Android build to a project with the Android workflow", () => {
+    assert.equal(pickByCapability(all, "release_android", null), null);
+    const withAndroid: Project = { ...app, expo: { ...app.expo!, workflows: { ...app.expo!.workflows, android: "android.yml" } } };
+    assert.equal(pickByCapability([withAndroid, gems], "release_android", "pmgems"), withAndroid);
   });
 
   it("sends an analytics question to the only project with PostHog", () => {

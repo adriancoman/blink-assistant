@@ -23,7 +23,8 @@ export const INTENTS = {
   rollback_ota: "Roll back, revert, or undo the latest OTA update so phones go back to the previous one",
   stop_rollout: "Stop, pause, halt, or cancel an OTA update or rollout that is in progress",
   resume_rollout: "Resume, unpause, or continue OTA updates or a rollout that was paused or stopped",
-  release_testflight: "Build the iOS app and upload it to TestFlight (a native or iOS build)",
+  release_testflight: "Build the iOS app and upload it to TestFlight (an iOS build)",
+  release_android: "Build the Android app (an Android or Google Play build)",
   status: "Show the status of the latest build or workflow run",
   app_store_release: "Submit to the App Store, send for App Store review, or release the app to users in the App Store",
   help: "Asks what the bot can do, which commands it has, or for help",
@@ -131,6 +132,16 @@ export async function respond(p: Project, history: string[], userText: string, c
 
     case "app_store_release":
       return reply(hasExpo(p) ? replies.appStoreNotSupported() : replies.notConfigured(p, "App Store releases"));
+
+    case "release_android": {
+      if (!hasExpo(p) || !p.expo.workflows.android) return reply(replies.notConfigured(p, "Android builds"));
+      const otherBranch = (answers.other_release_branch as { noul: number } | undefined)?.noul ?? 0;
+      if (otherBranch > 0.5) {
+        const named = branchAnswer("source_branch");
+        return reply(replies.releaseFromOtherBranch(p, named ? pickBranch(named, userText) : null));
+      }
+      return propose({ kind: "release_android" });
+    }
 
     case "help":
       return reply(replies.help(p));

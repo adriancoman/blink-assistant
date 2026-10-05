@@ -7,7 +7,7 @@ export type ExpoSettings = {
   iosBundleId: string;
   otaChannel: string;
   // null means the command isn't set up for this project.
-  workflows: { ota: string | null; testflight: string | null };
+  workflows: { ota: string | null; testflight: string | null; android: string | null };
   token: string;
   // "app-json": Blink bumps expo.version in app.json; "none": the workflow handles versions.
   versioning: "app-json" | "none";
@@ -107,12 +107,17 @@ export function parseConfig(input: Raw, env: Env): Config {
       if (!isString(p.expo.iosBundleId)) problems.push(`${where}: "expo.iosBundleId" is required`);
       const versioning = p.expo.versioning ?? "app-json";
       if (versioning !== "app-json" && versioning !== "none") problems.push(`${where}: "expo.versioning" must be "app-json" or "none"`);
-      const workflow = (key: "ota" | "testflight", fallback: string) =>
+      const workflow = (key: "ota" | "testflight" | "android", fallback: string | null) =>
         p.expo.workflows && key in p.expo.workflows ? (isString(p.expo.workflows[key]) ? p.expo.workflows[key] : null) : fallback;
       project.expo = {
         iosBundleId: p.expo.iosBundleId ?? "",
         otaChannel: isString(p.expo.otaChannel) ? p.expo.otaChannel : "production",
-        workflows: { ota: workflow("ota", "ota-production.yml"), testflight: workflow("testflight", "release-native.yml") },
+        // Android is opt-in, since older configs predate it and their repos may not have the file.
+        workflows: {
+          ota: workflow("ota", "ota-production.yml"),
+          testflight: workflow("testflight", "release-native.yml"),
+          android: workflow("android", null),
+        },
         token: secret(isString(p.expo.tokenEnv) ? p.expo.tokenEnv : "EXPO_TOKEN", `${where} expo`),
         versioning,
         repoDir: isString(p.expo.repoDir) ? p.expo.repoDir : `.repos/${p.id}`,

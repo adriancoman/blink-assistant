@@ -65,6 +65,10 @@ function toolsFor(p: Project): { tools: FunctionTool[]; abilities: string[] } {
       );
       abilities.push(`- release_testflight: build iOS from "${releaseBranch}" and upload it to TestFlight.`);
     }
+    if (workflows.android) {
+      tools.push(tool("release_android", `Propose building Android from ${releaseBranch}. The user must confirm.`));
+      abilities.push(`- release_android: build Android from "${releaseBranch}" (a store build; uploading it to Google Play is manual).`);
+    }
     tools.push(
       tool("rollback_ota", `Propose rolling ${otaChannel} back to the previous OTA update. The user must confirm.`),
       tool("stop_rollout", `Propose stopping the OTA rollout (cancel a running OTA workflow, pause ${otaChannel}). The user must confirm.`),
@@ -87,7 +91,7 @@ function instructions(p: Project, abilities: string[]): string {
     p.github
       ? `- Releases always run from the "${p.github.releaseBranch}" branch. If asked to release from another branch, explain that and offer to merge it into "${p.github.releaseBranch}" first.`
       : null,
-    "- Only iOS is supported. Releasing to the App Store (submitting for review or to users) is not supported yet; say so.",
+    "- OTA updates and TestFlight are iOS only; Android can only be built, not uploaded to Google Play. Releasing to the App Store (submitting for review or to users) is not supported yet; say so.",
     "- Tools that change things only propose them. The user then sees a Confirm button, and nothing happens until they click it. Never say one of these has run.",
     "- Only use branch names from the branch list given to you.",
     "- If the request is still ambiguous, ask a short question instead of guessing. If it needs something no tool does, say so plainly.",
@@ -129,6 +133,8 @@ async function runTool(p: Project, call: ResponseFunctionToolCall, branches: str
         action: { kind: "release_testflight", version: plan.version, bumpFrom: plan.bumpFrom },
       };
     }
+    case "release_android":
+      return { result: proposed, action: { kind: "release_android" } };
     case "rollback_ota": {
       const plan = await planRollback(p);
       if (!plan.possible) return { result: plan.reason };

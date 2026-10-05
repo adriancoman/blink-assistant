@@ -26,6 +26,7 @@ Nothing with side effects runs without a **Confirm** click, whichever model prop
 | **Merge** | _merge main into release_, _main to release_ | Opens a PR and merges it if there are no conflicts. Otherwise it leaves the PR open and sends you the link. |
 | **OTA update** | _release an OTA_, _push an ota "fix the stars animation"_ | Publishes an iOS update from the release branch to the `production` channel. Quoted text becomes the update message. |
 | **TestFlight** | _release to TestFlight_, _ship 4.1.0 to TestFlight_ | Bumps the version if needed (see [Versioning](#versioning)), then builds iOS and uploads it to App Store Connect. |
+| **Android build** | _build Android_, _make an Android build_ | Runs the Android workflow on the release branch: a store `.aab` you upload to Google Play yourself. Only if `expo.workflows.android` is set. |
 | **Roll back the OTA** | _roll back the OTA_, _undo the last update_ | Republishes the previous production update with the same runtime, or rolls back to the code inside the store build. |
 | **Stop rollout** | _stop rollout_, _pause the OTA_ | Cancels a running OTA workflow before it publishes and pauses the `production` channel, so phones that don't have the update yet won't get it. |
 | **Resume rollout** | _resume rollout_ | Unpauses the `production` channel. |
@@ -75,7 +76,7 @@ Apple only accepts a build whose version is above the live App Store version **a
 - **A TypeSafe AI key** for Jev. Jev is in limited early access.
 - Per project, only for the capabilities you use:
   - **Merges:** GitHub access to the repo, through the `gh` CLI login or a token.
-  - **Releases (OTA, TestFlight, rollback, status):** an Expo app on EAS Build and EAS Update (with the `fingerprint` runtime policy and an OTA channel), an Expo access token, and the two EAS workflows below in the app repo.
+  - **Releases (OTA, TestFlight, rollback, status):** an Expo app on EAS Build and EAS Update (with the `fingerprint` runtime policy and an OTA channel), an Expo access token, and the EAS workflows below in the app repo (the Android one is optional).
   - **Analytics questions:** a PostHog project and a personal API key.
 - **Optional:** an OpenAI key for the Ask OpenAI fallback.
 
@@ -151,6 +152,25 @@ jobs:
     type: submit
     params:
       build_id: ${{ needs.ios_build.outputs.build_id }}
+      profile: production
+```
+</details>
+
+<details>
+<summary><code>.eas/workflows/build-android.yml</code> (optional, for <em>build Android</em>)</summary>
+
+```yaml
+name: Build Android
+
+on:
+  workflow_dispatch: {}
+
+jobs:
+  android_build:
+    name: Build Android
+    type: build
+    params:
+      platform: android
       profile: production
 ```
 </details>
@@ -275,7 +295,7 @@ Blink can manage several projects. Each one only has the capabilities whose bloc
       "expo": {
         "iosBundleId": "com.example.yourapp",
         "otaChannel": "production",
-        "workflows": { "ota": "ota-production.yml", "testflight": "release-native.yml" },
+        "workflows": { "ota": "ota-production.yml", "testflight": "release-native.yml", "android": "build-android.yml" },
         "tokenEnv": "EXPO_TOKEN",
         "versioning": "app-json"
       }
@@ -302,7 +322,7 @@ Blink can manage several projects. Each one only has the capabilities whose bloc
 | `github.releaseBranch` | no | Branch all releases run from. Default `release` |
 | `expo.iosBundleId` | yes, with `expo` | Used to look up the live App Store version |
 | `expo.otaChannel` | no | EAS Update channel for OTA, rollback and pause. Default `production` |
-| `expo.workflows.ota` / `.testflight` | no | Workflow file names in `.eas/workflows/`. Set one to `null` if the project doesn't have it, and that command is turned off. |
+| `expo.workflows.ota` / `.testflight` / `.android` | no | Workflow file names in `.eas/workflows/`. Set one to `null` if the project doesn't have it, and that command is turned off. `.android` defaults to `null`. |
 | `expo.tokenEnv` | no | Which `.env` secret holds this project's Expo token. Default `EXPO_TOKEN` |
 | `expo.versioning` | no | `app-json` (Blink bumps `expo.version` before TestFlight builds) or `none` (your workflow handles versions). Default `app-json` |
 | `expo.repoDir` | no | Where Blink keeps its clone. Default `./.repos/<id>` |
@@ -348,7 +368,7 @@ npm test           # pure logic only; no credentials needed
 
 ## Limitations
 
-- **iOS only.**
+- **Android is build-only.** OTA updates and TestFlight are iOS; Android builds aren't uploaded to Google Play.
 - **No App Store submission.** EAS has no job for submitting a version to App Store review.
 - **Single user, in-memory state.** Threads, pending confirmations and run watches reset when the bot restarts.
 - **The bot only runs while `npm start` is running.** Host it somewhere always-on if you need that.
