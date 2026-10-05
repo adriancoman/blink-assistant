@@ -1,22 +1,32 @@
 import { randomUUID } from "node:crypto";
 import { App, type BlockAction, type ButtonAction } from "@slack/bolt";
 import { type Action, describe, execute } from "./actions.ts";
-import { type AgentResult, respond } from "./agent.ts";
+import { type AgentResult, classifyIntent, respond } from "./agent.ts";
 import { config } from "./config.ts";
 import { askOpenAI, fallbackAvailable } from "./fallback.ts";
+import { pickByCapability, resolveProject } from "./projects.ts";
+import * as replies from "./replies.ts";
+import { hasExpo, type Project } from "./settings.ts";
 import { watchRun } from "./watch.ts";
 
 const app = new App({ token: config.slackBotToken, appToken: config.slackAppToken, socketMode: true });
 
 // In memory: a restart forgets conversations and unconfirmed actions, which is fine for one user.
-const threads = new Map<string, string[]>();
-const pending = new Map<string, { action: Action; createdAt: number }>();
+type Thread = { projectId: string | null; messages: string[] };
+const threads = new Map<string, Thread>();
+const pending = new Map<string, { projectId: string; action: Action; createdAt: number }>();
 // Requests Jev couldn't route, kept so the "Ask OpenAI" button can hand them over.
-const unrouted = new Map<string, { messages: string[]; createdAt: number }>();
+const unrouted = new Map<string, { projectId: string; messages: string[]; createdAt: number }>();
+// Messages waiting for the user to pick a project.
+const unassigned = new Map<string, { request: Request; createdAt: number }>();
 const PENDING_TTL_MS = 30 * 60 * 1000;
 
 const WORKING = "hourglass_flowing_sand";
 const FAILED = "x";
+
+const projectById = (id: string) => config.projects.find((p) => p.id === id);
+// With several projects, every reply says which one it's about.
+const label = (p: Project) => (config.projects.length > 1 ? `[${p.name}] ` : "");
 
 // Reactions are only a progress signal, so failing to set one never stops the request.
 async function react(op: "add" | "remove", channel: string, timestamp: string, name: string) {
@@ -25,6 +35,21 @@ async function react(op: "add" | "remove", channel: string, timestamp: string, n
   } catch (err) {
     console.warn(`Couldn't ${op} :${name}: reaction:`, err instanceof Error ? err.message : err);
   }
+}
+
+// Channel names need the channels:read / groups:read scopes. Without them, channels can still be
+// mapped by ID, and resolution falls through to the next step.
+const channelNames = new Map<string, string | null>();
+async function channelName(channel: string): Promise<string | null> {
+  if (channelNames.has(channel)) return channelNames.get(channel)!;
+  let name: string | null = null;
+  try {
+    name = (await app.client.conversations.info({ channel })).channel?.name ?? null;
+  } catch (err) {
+    console.warn(`Couldn't look up the name of channel ${channel}:`, err instanceof Error ? err.message : err);
+  }
+  channelNames.set(channel, name);
+  return name;
 }
 
 type Reply = (message: string, blocks?: object[]) => Promise<unknown>;
@@ -40,43 +65,103 @@ const button = (text: string, actionId: string, value: string, primary = false) 
 
 // Posts a result: the reply text (with an "Ask OpenAI" button when Jev couldn't route the request)
 // and a Confirm / Cancel card per proposed action.
-async function postResult(reply: Reply, result: AgentResult, messages: string[]) {
+async function postResult(reply: Reply, p: Project, result: AgentResult, messages: string[]) {
+  const text = result.text ? `${label(p)}${result.text}` : "";
   if (result.notUnderstood && fallbackAvailable) {
     const id = randomUUID();
-    unrouted.set(id, { messages: [...messages], createdAt: Date.now() });
-    await reply(result.text, [
-      { type: "section", text: { type: "mrkdwn", text: `${result.text}\n\nOr I can ask OpenAI to figure it out.` } },
+    unrouted.set(id, { projectId: p.id, messages: [...messages], createdAt: Date.now() });
+    await reply(text, [
+      { type: "section", text: { type: "mrkdwn", text: `${text}\n\nOr I can ask OpenAI to figure it out.` } },
       buttons(button("Ask OpenAI", "ask_openai", id)),
     ]);
-  } else if (result.text) {
-    await reply(result.text);
+  } else if (text) {
+    await reply(text);
   }
   for (const action of result.actions) {
     const id = randomUUID();
-    pending.set(id, { action, createdAt: Date.now() });
-    await reply(`Confirm: ${describe(action)}`, [
-      { type: "section", text: { type: "mrkdwn", text: `*Confirm:* ${describe(action)}` } },
+    pending.set(id, { projectId: p.id, action, createdAt: Date.now() });
+    const summary = `${label(p)}${describe(p, action)}`;
+    await reply(`Confirm: ${summary}`, [
+      { type: "section", text: { type: "mrkdwn", text: `*Confirm:* ${summary}` } },
       buttons(button("Confirm", "confirm", id, true), button("Cancel", "cancel", id)),
     ]);
   }
 }
 
-async function handle(args: { channel: string; threadTs: string; messageTs: string; user?: string; text: string }) {
-  const { channel, threadTs, messageTs, user, text } = args;
-  const reply: Reply = (message, blocks) =>
-    app.client.chat.postMessage({ channel, thread_ts: threadTs, text: message, blocks: blocks as never });
+type Request = { channel: string; threadTs: string; messageTs: string; user?: string; text: string };
+
+const replyIn = (channel: string, threadTs: string): Reply => (message, blocks) =>
+  app.client.chat.postMessage({ channel, thread_ts: threadTs, text: message, blocks: blocks as never });
+
+// Runs a request once its project is known.
+async function handleFor(p: Project, request: Request, thread: Thread) {
+  const { channel, threadTs, messageTs, text } = request;
+  const reply = replyIn(channel, threadTs);
+  thread.projectId = p.id;
+  try {
+    const progress = (note: string) => reply(`${label(p)}${note}`);
+    const result = await respond(p, thread.messages, text, { threadKey: `${channel}:${threadTs}`, progress });
+    await postResult(reply, p, result, thread.messages.slice(-5));
+    await react("remove", channel, messageTs, WORKING);
+  } catch (err) {
+    console.error(err);
+    await react("remove", channel, messageTs, WORKING);
+    await react("add", channel, messageTs, FAILED);
+    await reply(`${label(p)}Something went wrong: \`${String(err)}\``).catch((replyErr) => console.error("Couldn't reply:", replyErr));
+  }
+}
+
+async function handle(request: Request) {
+  const { channel, threadTs, messageTs, user, text } = request;
+  const reply = replyIn(channel, threadTs);
 
   if (user !== config.allowedUserId) {
     await reply("Sorry, I only take requests from my owner.");
     return;
   }
 
-  const history = threads.get(threadTs) ?? [];
-  threads.set(threadTs, history);
+  const thread = threads.get(threadTs) ?? { projectId: null, messages: [] };
+  threads.set(threadTs, thread);
+  thread.messages.push(text);
   await react("add", channel, messageTs, WORKING);
 
   try {
-    await postResult(reply, await respond(history, text), history.slice(-5));
+    const resolution = resolveProject({
+      projects: config.projects,
+      channelId: channel,
+      channelName: await channelName(channel),
+      text,
+      threadProjectId: thread.projectId,
+    });
+    if ("project" in resolution) {
+      await handleFor(resolution.project, request, thread);
+      return;
+    }
+
+    // Nothing named the project: use the thread's project if it can do this, otherwise the only
+    // project that can (e.g. TestFlight goes to the only project with Expo).
+    const intent = await classifyIntent(thread.messages, text).catch((err) => {
+      console.warn("Couldn't classify the request to pick a project:", err instanceof Error ? err.message : err);
+      return null;
+    });
+    if (intent === "help") {
+      await reply(replies.helpAll(resolution.ask));
+      await react("remove", channel, messageTs, WORKING);
+      return;
+    }
+    const picked = pickByCapability(resolution.ask, intent, thread.projectId);
+    if (picked) {
+      await handleFor(picked, request, thread);
+      return;
+    }
+
+    const id = randomUUID();
+    unassigned.set(id, { request, createdAt: Date.now() });
+    await reply(replies.askProject(), [
+      { type: "section", text: { type: "mrkdwn", text: replies.askProject() } },
+      // Slack requires a unique action_id per button in a block.
+      buttons(...resolution.ask.map((p) => button(p.name, `pick_project:${p.id}`, `${id}:${p.id}`))),
+    ]);
     await react("remove", channel, messageTs, WORKING);
   } catch (err) {
     console.error(err);
@@ -106,41 +191,67 @@ app.message(async ({ message, context }) => {
   await handle({ channel: message.channel, threadTs: message.thread_ts, messageTs: message.ts, user: message.user, text: message.text });
 });
 
-async function resolveButton(body: BlockAction, action: ButtonAction, run: boolean) {
+// Shared checks for buttons: owner only, and the card's channel, ts and thread.
+function buttonContext(body: BlockAction) {
   const channel = body.channel?.id;
   const ts = body.message?.ts;
-  if (!channel || !ts) return;
+  if (!channel || !ts || body.user.id !== config.allowedUserId) return null;
+  const threadTs = (body.message as { thread_ts?: string } | undefined)?.thread_ts ?? ts;
   const update = (text: string) => app.client.chat.update({ channel, ts, text, blocks: [] });
+  return { channel, ts, threadTs, update };
+}
 
-  if (body.user.id !== config.allowedUserId) return;
+const expired = (createdAt: number) => Date.now() - createdAt > PENDING_TTL_MS;
 
+app.action<BlockAction<ButtonAction>>(/^pick_project:/, async ({ ack, body, action }) => {
+  await ack();
+  const ctx = buttonContext(body);
+  if (!ctx) return;
+  const [id, projectId] = (action.value ?? "").split(":");
+  const entry = unassigned.get(id);
+  unassigned.delete(id);
+  const p = projectById(projectId);
+  if (!entry || expired(entry.createdAt) || !p) {
+    await ctx.update("This expired. Ask me again.");
+    return;
+  }
+  await ctx.update(`Project: *${p.name}*`);
+  const thread = threads.get(entry.request.threadTs) ?? { projectId: null, messages: [entry.request.text] };
+  threads.set(entry.request.threadTs, thread);
+  await react("add", entry.request.channel, entry.request.messageTs, WORKING);
+  await handleFor(p, entry.request, thread);
+});
+
+async function resolveButton(body: BlockAction, action: ButtonAction, run: boolean) {
+  const ctx = buttonContext(body);
+  if (!ctx) return;
   const entry = pending.get(action.value ?? "");
   pending.delete(action.value ?? "");
-  if (!entry || Date.now() - entry.createdAt > PENDING_TTL_MS) {
-    await update("This confirmation expired. Ask me again.");
+  const p = entry && projectById(entry.projectId);
+  if (!entry || expired(entry.createdAt) || !p) {
+    await ctx.update("This confirmation expired. Ask me again.");
     return;
   }
 
-  const summary = describe(entry.action);
+  const summary = `${label(p)}${describe(p, entry.action)}`;
   if (!run) {
-    await update(`~${summary}~ Cancelled.`);
+    await ctx.update(`~${summary}~ Cancelled.`);
     return;
   }
 
-  await update(`⏳ ${summary}`);
+  await ctx.update(`⏳ ${summary}`);
   try {
-    const result = await execute(entry.action);
-    await update(`✅ ${result.text}`);
-    if (result.watch) {
+    const result = await execute(p, entry.action);
+    await ctx.update(`✅ ${label(p)}${result.text}`);
+    if (result.watch && hasExpo(p)) {
       // Reply in the same thread and mention the user, so the result shows up as a notification.
-      const threadTs = (body.message as { thread_ts?: string } | undefined)?.thread_ts ?? ts;
-      watchRun(result.watch, (message) =>
-        app.client.chat.postMessage({ channel, thread_ts: threadTs, text: `<@${body.user.id}> ${message}` }),
+      watchRun(p, result.watch, (message) =>
+        app.client.chat.postMessage({ channel: ctx.channel, thread_ts: ctx.threadTs, text: `<@${body.user.id}> ${label(p)}${message}` }),
       );
     }
   } catch (err) {
     console.error(err);
-    await update(`❌ ${summary}\n\`${String(err)}\``);
+    await ctx.update(`❌ ${summary}\n\`${String(err)}\``);
   }
 }
 
@@ -156,32 +267,27 @@ app.action<BlockAction<ButtonAction>>("cancel", async ({ ack, body, action }) =>
 
 app.action<BlockAction<ButtonAction>>("ask_openai", async ({ ack, body, action }) => {
   await ack();
-  const channel = body.channel?.id;
-  const ts = body.message?.ts;
-  if (!channel || !ts || body.user.id !== config.allowedUserId) return;
-  const threadTs = (body.message as { thread_ts?: string } | undefined)?.thread_ts ?? ts;
-  const update = (text: string) => app.client.chat.update({ channel, ts, text, blocks: [] });
-  const reply: Reply = (message, blocks) =>
-    app.client.chat.postMessage({ channel, thread_ts: threadTs, text: message, blocks: blocks as never });
-
+  const ctx = buttonContext(body);
+  if (!ctx) return;
   const entry = unrouted.get(action.value ?? "");
   unrouted.delete(action.value ?? "");
-  if (!entry || Date.now() - entry.createdAt > PENDING_TTL_MS) {
-    await update("This expired. Ask me again.");
+  const p = entry && projectById(entry.projectId);
+  if (!entry || expired(entry.createdAt) || !p) {
+    await ctx.update("This expired. Ask me again.");
     return;
   }
 
-  await update("⏳ Asking OpenAI…");
+  await ctx.update("⏳ Asking OpenAI…");
   try {
-    const result = await askOpenAI(entry.messages);
-    await update("🤖 Asked OpenAI:");
+    const result = await askOpenAI(p, entry.messages);
+    await ctx.update("🤖 Asked OpenAI:");
     // OpenAI's reply is shown as-is; any action it proposes still needs Confirm.
-    await postResult(reply, { text: result.text, actions: result.actions }, entry.messages);
+    await postResult(replyIn(ctx.channel, ctx.threadTs), p, { text: result.text, actions: result.actions }, entry.messages);
   } catch (err) {
     console.error(err);
-    await update(`❌ OpenAI couldn't help: \`${String(err)}\``);
+    await ctx.update(`❌ OpenAI couldn't help: \`${String(err)}\``);
   }
 });
 
 await app.start();
-console.log(`Blink running for ${config.owner}/${config.repo}`);
+console.log(`Blink running for ${config.projects.length} project(s): ${config.projects.map((p) => p.name).join(", ")}`);

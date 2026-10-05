@@ -1,18 +1,19 @@
 import { Octokit } from "@octokit/rest";
 import { RequestError } from "@octokit/request-error";
 import { config } from "./config.ts";
+import type { GithubProject } from "./settings.ts";
 
 const octokit = new Octokit({ auth: config.githubToken });
-const repo = { owner: config.owner, repo: config.repo };
+const repoOf = (p: GithubProject) => ({ owner: p.github.owner, repo: p.github.repo });
 
 export type MergeResult =
   | { outcome: "up_to_date" }
   | { outcome: "merged"; prUrl: string; sha: string }
   | { outcome: "needs_attention"; prUrl: string; reason: string };
 
-async function branchExists(branch: string): Promise<boolean> {
+async function branchExists(p: GithubProject, branch: string): Promise<boolean> {
   try {
-    await octokit.repos.getBranch({ ...repo, branch });
+    await octokit.repos.getBranch({ ...repoOf(p), branch });
     return true;
   } catch (err) {
     if (err instanceof RequestError && err.status === 404) return false;
@@ -21,9 +22,9 @@ async function branchExists(branch: string): Promise<boolean> {
 }
 
 // GitHub computes mergeability in the background; `mergeable` is null until it's done.
-async function waitForMergeable(pullNumber: number) {
+async function waitForMergeable(p: GithubProject, pullNumber: number) {
   for (let attempt = 0; attempt < 10; attempt++) {
-    const { data } = await octokit.pulls.get({ ...repo, pull_number: pullNumber });
+    const { data } = await octokit.pulls.get({ ...repoOf(p), pull_number: pullNumber });
     if (data.mergeable !== null) return data;
     await new Promise((resolve) => setTimeout(resolve, 2000));
   }
@@ -31,15 +32,16 @@ async function waitForMergeable(pullNumber: number) {
 }
 
 // Merges via a PR so there's a record and branch protection is respected.
-export async function mergeBranches(source: string, target: string): Promise<MergeResult> {
+export async function mergeBranches(p: GithubProject, source: string, target: string): Promise<MergeResult> {
+  const repo = repoOf(p);
   for (const branch of [source, target]) {
-    if (!(await branchExists(branch))) throw new Error(`Branch \`${branch}\` doesn't exist on GitHub`);
+    if (!(await branchExists(p, branch))) throw new Error(`Branch \`${branch}\` doesn't exist on GitHub`);
   }
 
   const { data: comparison } = await octokit.repos.compareCommits({ ...repo, base: target, head: source });
   if (comparison.ahead_by === 0) return { outcome: "up_to_date" };
 
-  const { data: open } = await octokit.pulls.list({ ...repo, state: "open", head: `${config.owner}:${source}`, base: target });
+  const { data: open } = await octokit.pulls.list({ ...repo, state: "open", head: `${repo.owner}:${source}`, base: target });
   const pr =
     open[0] ??
     (
@@ -52,7 +54,7 @@ export async function mergeBranches(source: string, target: string): Promise<Mer
       })
     ).data;
 
-  const checked = await waitForMergeable(pr.number);
+  const checked = await waitForMergeable(p, pr.number);
   if (!checked.mergeable) {
     return { outcome: "needs_attention", prUrl: pr.html_url, reason: "it has merge conflicts" };
   }
@@ -69,15 +71,15 @@ export async function mergeBranches(source: string, target: string): Promise<Mer
   }
 }
 
-export async function readFile(path: string, branch: string): Promise<{ content: string; sha: string }> {
-  const { data } = await octokit.repos.getContent({ ...repo, path, ref: branch });
+export async function readFile(p: GithubProject, path: string, branch: string): Promise<{ content: string; sha: string }> {
+  const { data } = await octokit.repos.getContent({ ...repoOf(p), path, ref: branch });
   if (Array.isArray(data) || data.type !== "file") throw new Error(`${path} is not a file`);
   return { content: Buffer.from(data.content, "base64").toString("utf8"), sha: data.sha };
 }
 
-export async function writeFile(path: string, branch: string, content: string, sha: string, message: string) {
+export async function writeFile(p: GithubProject, path: string, branch: string, content: string, sha: string, message: string) {
   await octokit.repos.createOrUpdateFileContents({
-    ...repo,
+    ...repoOf(p),
     path,
     branch,
     sha,
@@ -86,17 +88,17 @@ export async function writeFile(path: string, branch: string, content: string, s
   });
 }
 
-export async function createBranch(name: string, from: string) {
-  const { data } = await octokit.repos.getBranch({ ...repo, branch: from });
-  await octokit.git.createRef({ ...repo, ref: `refs/heads/${name}`, sha: data.commit.sha });
+export async function createBranch(p: GithubProject, name: string, from: string) {
+  const { data } = await octokit.repos.getBranch({ ...repoOf(p), branch: from });
+  await octokit.git.createRef({ ...repoOf(p), ref: `refs/heads/${name}`, sha: data.commit.sha });
 }
 
-export async function deleteBranch(name: string) {
-  await octokit.git.deleteRef({ ...repo, ref: `heads/${name}` });
+export async function deleteBranch(p: GithubProject, name: string) {
+  await octokit.git.deleteRef({ ...repoOf(p), ref: `heads/${name}` });
 }
 
 // Excludes the bot's own temporary branches.
-export async function listBranches(): Promise<string[]> {
-  const branches = await octokit.paginate(octokit.repos.listBranches, { ...repo, per_page: 100 });
+export async function listBranches(p: GithubProject): Promise<string[]> {
+  const branches = await octokit.paginate(octokit.repos.listBranches, { ...repoOf(p), per_page: 100 });
   return branches.map((b) => b.name).filter((name) => !name.startsWith("release-bot/"));
 }

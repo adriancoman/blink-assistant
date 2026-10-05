@@ -1,5 +1,6 @@
 import { FINISHED_STATUSES, runDetails, type StartedRun } from "./expo.ts";
 import * as replies from "./replies.ts";
+import type { ExpoProject } from "./settings.ts";
 
 const POLL_MS = 30 * 1000;
 // Store builds can sit in the free-tier queue for a long time, so give up only after a while.
@@ -7,16 +8,16 @@ const GIVE_UP_MS = 4 * 60 * 60 * 1000;
 
 // Follows a workflow run and calls `report` once with the final message. Kept in memory, so a
 // restart stops watching; `status` still shows the latest run.
-export function watchRun(run: StartedRun, report: (message: string) => Promise<unknown>) {
+export function watchRun(p: ExpoProject, run: StartedRun, report: (message: string) => Promise<unknown>) {
   const startedAt = Date.now();
   let failedPolls = 0;
 
   const poll = async () => {
     try {
-      const details = await runDetails(run.id);
+      const details = await runDetails(p, run.id);
       failedPolls = 0;
       if (FINISHED_STATUSES.has(details.status)) {
-        await report(replies.status(details));
+        await report(replies.status(p, details));
         return;
       }
     } catch (err) {

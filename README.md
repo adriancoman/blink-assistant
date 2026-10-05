@@ -14,7 +14,7 @@ Nothing with side effects runs without a **Confirm** click, whichever model prop
 - [Safety model](#safety-model)
 - [How it works](#how-it-works)
 - [Requirements](#requirements)
-- [Setup](#setup)
+- [Installation guide](#installation-guide)
 - [Configuration](#configuration)
 - [Development](#development)
 - [Limitations](#limitations)
@@ -30,6 +30,7 @@ Nothing with side effects runs without a **Confirm** click, whichever model prop
 | **Stop rollout** | _stop rollout_, _pause the OTA_ | Cancels a running OTA workflow before it publishes and pauses the `production` channel, so phones that don't have the update yet won't get it. |
 | **Resume rollout** | _resume rollout_ | Unpauses the `production` channel. |
 | **Status** | _status_, _how did the last build go?_ | The latest workflow run: result, failed step, version, duration, link, and whether `production` is paused. |
+| **Analytics question** | _how many signups this week?_, _and compared to last week?_ | Asks PostHog AI about the project's PostHog data and posts its answer (usually 20–60 seconds). Follow-ups in the thread continue the same PostHog AI conversation. Read-only, so no Confirm. Needs a `posthog` block. |
 | **App Store release** | _submit to the App Store_ | Not supported (yet). The bot says so and offers TestFlight. |
 
 - Follow-ups in a thread don't need another @mention (_merge main_ → _into release_).
@@ -38,7 +39,8 @@ Nothing with side effects runs without a **Confirm** click, whichever model prop
 
 ## Safety model
 
-- **One user.** The bot ignores everyone except `allowedSlackUserId`.
+- **One user.** Blink ignores everyone except `allowedSlackUserId`.
+- **The right project.** Every reply and Confirm card names the project when there's more than one, and Blink asks rather than guessing which project you meant.
 - **Confirm before acting.** Merges, releases, rollbacks and pauses are posted as Confirm / Cancel cards that expire after 30 minutes. Neither model can run anything itself.
 - **No invented branches.** Jev picks branches from the repo's real branch list, and the bot only accepts a branch that literally appears in your message. OpenAI's picks are checked against the same list.
 - **Ask, don't guess.** Below 0.6 confidence the bot asks a question instead of acting.
@@ -57,7 +59,7 @@ Slack @mention
   → watch the workflow run and report back in the thread
 ```
 
-**Starting EAS workflows.** The bot keeps its own clone of your app repo in `.repo/`. Before every run it resets the clone to the release branch on GitHub, then runs `eas workflow:run`, which uploads the project. This works even when the Expo project can't be linked to the GitHub repo (for example, a personal Expo account with an organization's repo).
+**Starting EAS workflows.** Blink keeps its own clone of each app repo in `.repos/<project>/`. Before every run it resets the clone to the release branch on GitHub, then runs `eas workflow:run`, which uploads the project. This works even when the Expo project can't be linked to the GitHub repo (for example, a personal Expo account with an organization's repo).
 
 ### Versioning
 Apple only accepts a build whose version is above the live App Store version **and** above any version it has already approved. Approved builds that never went live don't appear on the public App Store page, so the bot also checks EAS's build history.
@@ -68,15 +70,14 @@ Apple only accepts a build whose version is above the live App Store version **a
 
 ## Requirements
 
-- **Node.js 22+**
-- **An Expo app** using EAS Build, plus EAS Update with the `fingerprint` runtime policy and a `production` channel.
-- **Two EAS workflows in the app repo** (examples below): `.eas/workflows/ota-production.yml` and `.eas/workflows/release-native.yml`.
-- **A Slack workspace** where you can create an app.
-- **Accounts:**
-  - a TypeSafe AI key for Jev (Jev is in limited early access)
-  - an Expo access token (a robot token is best)
-  - GitHub access to the app repo (the `gh` CLI login or a token)
-  - optionally, an OpenAI key for the fallback
+- **Node.js 22+** and **git** on the machine that runs Blink.
+- **A Slack workspace** where you can create apps.
+- **A TypeSafe AI key** for Jev. Jev is in limited early access.
+- Per project, only for the capabilities you use:
+  - **Merges:** GitHub access to the repo, through the `gh` CLI login or a token.
+  - **Releases (OTA, TestFlight, rollback, status):** an Expo app on EAS Build and EAS Update (with the `fingerprint` runtime policy and an OTA channel), an Expo access token, and the two EAS workflows below in the app repo.
+  - **Analytics questions:** a PostHog project and a personal API key.
+- **Optional:** an OpenAI key for the Ask OpenAI fallback.
 
 <details>
 <summary><code>.eas/workflows/ota-production.yml</code></summary>
@@ -154,21 +155,86 @@ jobs:
 ```
 </details>
 
-## Setup
+## Installation guide
 
-1. **Create the Slack app.** At https://api.slack.com/apps, choose *Create New App → From a manifest* and paste [`slack-app-manifest.yml`](slack-app-manifest.yml).
-   - *Basic Information → App-Level Tokens*: create one with `connections:write`. That's `SLACK_APP_TOKEN`.
-   - *Install App*: install it, then copy the *Bot User OAuth Token*. That's `SLACK_BOT_TOKEN`.
-   - Invite the bot to a channel (`/invite @blink`).
-   - If you change permissions later, reinstall the app so the token picks them up.
-2. **Configure:** copy the two templates and fill them in (see [Configuration](#configuration)):
-   ```sh
-   cp .env.example .env                                         # secrets
-   cp release-bot.config.example.json release-bot.config.json   # settings
-   ```
-3. **Run:** `npm install && npm start`
+About 30 minutes for a first install. Each step says where the value goes.
 
-The bot uses Slack's Socket Mode, so it needs no public URL. The first release clones your app repo and installs its packages, so it takes a few minutes; later runs only re-sync.
+### 1. Get the code
+```sh
+git clone https://github.com/adriancoman/blink-assistant.git blink
+cd blink
+npm install
+cp .env.example .env                                         # secrets
+cp release-bot.config.example.json release-bot.config.json   # projects and settings
+```
+Both copied files are gitignored, so your secrets and settings never get committed.
+
+### 2. Create the Slack app
+1. Go to https://api.slack.com/apps → **Create New App** → **From a manifest**, pick your workspace, and paste [`slack-app-manifest.yml`](slack-app-manifest.yml). It sets the name, permissions, events and Socket Mode for you.
+2. **Basic Information → App-Level Tokens → Generate Token and Scopes:** add the `connections:write` scope and generate. Copy the token (`xapp-…`) into `SLACK_APP_TOKEN` in `.env`.
+3. **Install App → Install to Workspace → Allow.** Copy the **Bot User OAuth Token** (`xoxb-…`) into `SLACK_BOT_TOKEN`. Don't use the User OAuth Token (`xoxp-`).
+4. **Your Slack member ID:** in Slack, open your profile → **⋮** → **Copy member ID** (`U…`). Put it in `allowedSlackUserId` in `release-bot.config.json`. Blink ignores everyone else.
+5. Invite the bot to the channels where you'll use it: `/invite @blink`.
+
+If you change the app's permissions later, click **Reinstall to Workspace** so the token picks them up.
+
+### 3. Get the AI keys
+- **Jev (required):** create a key at https://console.typesafe.ai/keys and put it in `TYPESAFE_API_KEY`.
+- **OpenAI (optional):** create a key at https://platform.openai.com/api-keys and put it in `OPENAI_API_KEY`. Without it, Blink works the same but doesn't offer the Ask OpenAI button. API usage is billed separately from ChatGPT plans.
+
+### 4. Connect each project's services
+Add each project to `projects` in `release-bot.config.json` (see [Configuration](#configuration)), with only the blocks it needs:
+
+**GitHub** (`github` block, for merges and releases)
+- Blink uses your `gh` CLI login by default (`gh auth login`). To use a dedicated token instead, set `GITHUB_TOKEN` in `.env`; it needs read/write access to contents and pull requests on the repos.
+- If the GitHub organization uses SSO, authorize the login or token for that organization.
+
+**Expo** (`expo` block, for OTA, TestFlight, rollback, status)
+- Create a token on https://expo.dev under the account that owns the app: **Settings → Access tokens**. A **robot** with the **Developer** role is best, since its token only works for that account.
+- Put it in `.env`. The default name is `EXPO_TOKEN`; for projects on different Expo accounts, give each its own secret and point to it with `expo.tokenEnv` (e.g. `"tokenEnv": "EXPO_TOKEN_ACME"`).
+- Add the two workflow files to the app repo (examples under [Requirements](#requirements)), or set a workflow to `null` to turn that command off.
+
+**PostHog** (`posthog` block, for analytics questions)
+- Create a personal API key in PostHog: **Settings → Personal API keys**. Limit it to the project, and grant **Conversation: write** (PostHog AI). Read access to Project, Query and Insight is useful too.
+- Put it in `.env`. The default name is `POSTHOG_API_KEY`; use `posthog.apiKeyEnv` to give projects separate keys.
+- Set `posthog.host` (`https://eu.posthog.com` or `https://us.posthog.com`) and `posthog.projectId` (the number in your PostHog URLs, `/project/<id>`).
+- PostHog AI must be enabled for your organization (it asks you to approve AI data processing the first time).
+
+### 5. Start Blink
+```sh
+npm start
+```
+You should see `Blink running for 2 project(s): …`. If something's missing or malformed, Blink lists every problem and stops.
+
+Blink uses Slack's Socket Mode, so it needs no public URL or open port. It only runs while this process runs. Host it somewhere always-on (or as a login service on your Mac) if you need that.
+
+### 6. Check it works
+In a channel Blink is in, send `@blink what can you do?`. You should see a ⏳ on your message, then a list of what Blink can do for each project. Then try something read-only, like `@blink status` or an analytics question.
+
+The first release for an Expo project clones the app repo and installs its packages, so it takes a few minutes. Later runs only re-sync.
+
+### Adding a project later
+Add it to `projects` in `release-bot.config.json`, add any new secrets to `.env`, and restart Blink. To give it its own channel, put the channel's name (or ID) in `slackChannels`.
+
+### Using Blink in another Slack workspace
+Run a separate copy of Blink with its own Slack app:
+1. Clone the repo again into a new folder.
+2. Create a new app from the manifest in that workspace (step 2). A Slack app belongs to the workspace it was created in.
+3. Fill in that copy's `.env` and `release-bot.config.json`. Your member ID is different in every workspace. The Jev and OpenAI keys can be reused.
+
+Several copies can run on the same machine. Never run two copies with the same Slack app's tokens: Slack splits events between connections, so each copy would miss some messages.
+
+### Troubleshooting
+| Symptom | Cause and fix |
+|---|---|
+| Blink reacts with ⏳ but never replies | Check the terminal running Blink for the error. |
+| No ⏳ or ❌ reactions at all | The app lacks `reactions:write`. Add it and reinstall the app. |
+| `invalid_auth` on startup or after a while | A Slack token was revoked or rotated. Put the current tokens in `.env` and restart. |
+| `missing_scope` in the log | The Slack app lacks a permission from the manifest. Add it and reinstall. |
+| Channel names don't map to projects | Needs `channels:read` / `groups:read`. Or use channel IDs (`C0…`) in `slackChannels`. |
+| Expo commands fail with "not authorized" | The Expo token's account doesn't own the project. Use a token from the right account (`expo.tokenEnv`). |
+| PostHog says `missing required scope 'conversation:read'` | Edit the PostHog key and grant **Conversation: write**. |
+| Apple rejects a TestFlight upload's version | A higher version was approved earlier. Blink checks EAS history, but builds made elsewhere may need `ship X.Y.Z to TestFlight` with a higher version. |
 
 ## Configuration
 
@@ -180,39 +246,80 @@ Secrets and settings live in separate files, so the settings file can be shared 
 |---|---|---|
 | `SLACK_BOT_TOKEN`, `SLACK_APP_TOKEN` | yes | From the Slack app (above) |
 | `TYPESAFE_API_KEY` | yes | From https://console.typesafe.ai/keys |
-| `EXPO_TOKEN` | yes | Expo access token with access to your project |
+| `EXPO_TOKEN` | per project | Expo access token. Each project with an `expo` block names its secret (`expo.tokenEnv`, default `EXPO_TOKEN`), so projects on different Expo accounts can use different tokens. |
+| `POSTHOG_API_KEY` | per project | For projects with a `posthog` block (`posthog.apiKeyEnv`) |
 | `OPENAI_API_KEY` | no | Enables the Ask OpenAI fallback |
 | `GITHUB_TOKEN` | no | Defaults to your `gh` CLI login |
 
-**`release-bot.config.json`: settings**
+**`release-bot.config.json`: projects and settings**
+
+Blink can manage several projects. Each one only has the capabilities whose blocks you configure, and Blink only offers the commands a project supports:
+
+| Block | Enables | Needs |
+|---|---|---|
+| `github` | merges | |
+| `expo` | OTA, TestFlight, rollback, stop/resume rollout, status | `github` (releases come from the release branch) |
+| `posthog` | analytics questions answered by PostHog AI | A personal API key with **Conversation: write** scope |
 
 ```json
 {
-  "appName": "your-app",
-  "githubRepo": "your-org/your-app",
-  "iosBundleId": "com.example.yourapp",
   "allowedSlackUserId": "U0123456789",
-  "releaseBranch": "release",
-  "otaChannel": "production",
-  "workflows": { "ota": "ota-production.yml", "testflight": "release-native.yml" },
-  "models": { "jev": "jev-1.13.0", "openai": "gpt-6-luna" }
+  "models": { "jev": "jev-1.13.0", "openai": "gpt-6-luna" },
+  "projects": [
+    {
+      "id": "mobile",
+      "name": "My App",
+      "aliases": ["my-app"],
+      "slackChannels": ["my-app-releases"],
+      "github": { "repo": "your-org/your-app", "releaseBranch": "release" },
+      "expo": {
+        "iosBundleId": "com.example.yourapp",
+        "otaChannel": "production",
+        "workflows": { "ota": "ota-production.yml", "testflight": "release-native.yml" },
+        "tokenEnv": "EXPO_TOKEN",
+        "versioning": "app-json"
+      }
+    },
+    {
+      "id": "web",
+      "name": "Website",
+      "slackChannels": ["web-releases"],
+      "github": { "repo": "your-org/your-website" },
+      "posthog": { "host": "https://eu.posthog.com", "projectId": "12345" }
+    }
+  ]
 }
 ```
 
 | Setting | Required | What it is |
 |---|---|---|
-| `appName` | yes | Your app's name, used in messages to OpenAI |
-| `githubRepo` | yes | `owner/repo` of your app |
-| `iosBundleId` | yes | Used to look up the live App Store version |
-| `allowedSlackUserId` | yes | The only Slack user the bot listens to (profile → ⋯ → Copy member ID) |
-| `releaseBranch` | no | Branch all releases run from. Default `release` |
-| `otaChannel` | no | EAS Update channel for OTA, rollback and pause. Default `production` |
-| `workflows.ota`, `workflows.testflight` | no | Workflow file names in `.eas/workflows/`. Defaults as above |
-| `models.jev` | no | Default `jev-1.13.0`. Pinned, because the confidence threshold is tuned per model. |
-| `models.openai` | no | Default `gpt-6-luna` |
-| `repoDir` | no | Where the bot keeps its clone of your app. Default `./.repo` |
+| `allowedSlackUserId` | yes | The only Slack user Blink listens to (profile → ⋯ → Copy member ID) |
+| `models.jev` / `models.openai` | no | Defaults `jev-1.13.0` (pinned, because the confidence threshold is tuned per model) and `gpt-6-luna` |
+| `projects[].id` | yes | Short, unique, lowercase |
+| `projects[].name`, `aliases` | no | How you refer to the project in messages. The id and name always count. |
+| `projects[].slackChannels` | no | Channel names (`my-app-releases`) or IDs (`C0123…`) that belong to this project |
+| `github.repo` | yes, with `github` | `owner/repo` |
+| `github.releaseBranch` | no | Branch all releases run from. Default `release` |
+| `expo.iosBundleId` | yes, with `expo` | Used to look up the live App Store version |
+| `expo.otaChannel` | no | EAS Update channel for OTA, rollback and pause. Default `production` |
+| `expo.workflows.ota` / `.testflight` | no | Workflow file names in `.eas/workflows/`. Set one to `null` if the project doesn't have it, and that command is turned off. |
+| `expo.tokenEnv` | no | Which `.env` secret holds this project's Expo token. Default `EXPO_TOKEN` |
+| `expo.versioning` | no | `app-json` (Blink bumps `expo.version` before TestFlight builds) or `none` (your workflow handles versions). Default `app-json` |
+| `expo.repoDir` | no | Where Blink keeps its clone. Default `./.repos/<id>` |
+| `posthog.host`, `posthog.projectId` | yes, with `posthog` | Your PostHog instance and project; `posthog.apiKeyEnv` names the secret (default `POSTHOG_API_KEY`) |
 
-The bot checks the file on startup and tells you exactly what's missing or malformed. To use a different path, set `RELEASE_BOT_CONFIG`.
+Blink checks the file on startup and lists every problem it finds. To use a different path, set `RELEASE_BOT_CONFIG`. The older single-app format (flat `githubRepo`, `iosBundleId`, …) is still accepted as one project.
+
+### Which project a message is about
+1. **The channel:** a channel listed in a project's `slackChannels`.
+2. **The message:** a project's id, name or alias appears in it (_"release myapp to TestFlight"_).
+3. **The thread:** follow-ups stay on the thread's project, as long as it can do what you asked.
+4. **What the request needs:** if only one project can do it, that's the one. With one Expo app and one PostHog-only project, _"release to TestFlight"_ goes to the Expo app and _"how many signups this week?"_ to the PostHog project.
+5. **Otherwise Blink asks**, with a button per project (e.g. a merge when several projects have GitHub). With only one project configured, it never asks.
+
+With more than one project, every reply and Confirm card starts with the project's name, e.g. `[MyApp]`.
+
+Matching channels by name needs the `channels:read` and `groups:read` permissions (included in the manifest). Without them, list channel IDs instead.
 
 ## Development
 
@@ -228,6 +335,7 @@ npm test           # pure logic only; no credentials needed
 | `src/agent.ts` | Jev questions and turning answers into replies or proposed actions |
 | `src/fallback.ts` | The OpenAI fallback, with the bot's commands as tools |
 | `src/parsing.ts` | What code reads from messages: branch checks, versions, OTA messages |
+| `src/posthog.ts` | PostHog AI: asking questions and reading the answer from its stream |
 | `src/replies.ts` | Reply templates |
 | `src/actions.ts` | What each confirmed action does |
 | `src/versioning.ts`, `src/version.ts` | Version rules, and fetching the live and built versions |
@@ -235,7 +343,8 @@ npm test           # pure logic only; no credentials needed
 | `src/watch.ts` | Follows a started workflow run and reports when it finishes |
 | `src/expo.ts`, `src/repo.ts` | EAS CLI calls and the bot's clone of the app repo |
 | `src/github.ts` | GitHub API: branches, PRs, merges, file commits |
-| `src/config.ts` | Loads secrets from `.env` and settings from `release-bot.config.json` |
+| `src/config.ts`, `src/settings.ts` | Load secrets and settings; parse and validate projects |
+| `src/projects.ts` | Which project a message is about |
 
 ## Limitations
 

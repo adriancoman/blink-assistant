@@ -1,16 +1,43 @@
 {
-  "appName": "your-app",
-  "githubRepo": "your-org/your-app",
-  "iosBundleId": "com.example.yourapp",
   "allowedSlackUserId": "U0123456789",
-  "releaseBranch": "release",
-  "otaChannel": "production",
-  "workflows": {
-    "ota": "ota-production.yml",
-    "testflight": "release-native.yml"
-  },
   "models": {
     "jev": "jev-1.13.0",
     "openai": "gpt-6-luna"
-  }
+  },
+  "projects": [
+    {
+      "id": "mobile",
+      "name": "My App",
+      "aliases": [
+        "my-app"
+      ],
+      "slackChannels": [
+        "my-app-releases"
+      ],
+      "github": {
+        "repo": "your-org/your-app",
+        "releaseBranch": "release"
+      },
+      "expo": {
+        "iosBundleId": "com.example.yourapp",
+        "otaChannel": "production",
+        "workflows": {
+          "ota": "ota-production.yml",
+          "testflight": "release-native.yml"
+        },
+        "tokenEnv": "EXPO_TOKEN",
+        "versioning": "app-json"
+      }
+    },
+    {
+      "id": "web",
+      "name": "Website",
+      "slackChannels": [
+        "web-releases"
+      ],
+      "github": {
+        "repo": "your-org/your-website"
+      }
+    }
+  ]
 }

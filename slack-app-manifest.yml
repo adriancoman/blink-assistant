@@ -12,6 +12,9 @@ oauth_config:
       - chat:write
       # Progress reactions on your messages
       - reactions:write
+      # Match projects to channels by name
+      - channels:read
+      - groups:read
       # Read thread follow-ups without another @mention
       - channels:history
       - groups:history

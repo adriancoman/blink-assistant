@@ -1,0 +1,15 @@
+event: message
+data: {"type": "human", "content": "How many unique users visited in the last 7 days?"}
+
+event: message
+data: {"type": "ai", "content": "", "tool_calls": [{"name": "create_insight"}]}
+
+event: message
+data: {"type": "tool", "content": "Name: Unique visitors – last 7 days"}
+
+event: message
+data: {"type": "ai", "content": "**76 unique users** visited your product in the last 7 days.\n\nThis is based on unique users who triggered a `$pageview` event between Sept", "tool_calls": []}
+
+event: message
+data: {"type": "ai", "content": "**76 unique users** visited your product in the last 7 days.\n\nThis is based on unique users who triggered a `$pageview` event between Sept 27 and Oct 4. If you'd like to break this down by day, country, or another dimension, just let me know!", "tool_calls": []}
+
