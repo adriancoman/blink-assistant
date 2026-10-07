@@ -35,7 +35,7 @@ export const hasGithub = (p: Project): p is GithubProject => Boolean(p.github);
 export const hasExpo = (p: Project): p is ExpoProject => Boolean(p.github && p.expo);
 
 export type Config = {
-  allowedUserId: string;
+  allowedUserIds: string[];
   models: { jev: string; openai: string };
   projects: Project[];
 };
@@ -71,7 +71,9 @@ export function parseConfig(input: Raw, env: Env): Config {
   const raw = "projects" in input ? input : fromLegacy(input);
   const problems: string[] = [];
 
-  if (!isString(raw.allowedSlackUserId)) problems.push(`"allowedSlackUserId" is required`);
+  // One member ID, or a list of them.
+  const allowedUserIds = [raw.allowedSlackUserId].flat().filter(isString);
+  if (!allowedUserIds.length) problems.push(`"allowedSlackUserId" is required (a Slack member ID, or a list of them)`);
   if (!Array.isArray(raw.projects) || raw.projects.length === 0) problems.push(`"projects" must list at least one project`);
 
   const secret = (name: string, where: string) => {
@@ -140,7 +142,7 @@ export function parseConfig(input: Raw, env: Env): Config {
 
   if (problems.length) throw new Error(problems.join("; "));
   return {
-    allowedUserId: raw.allowedSlackUserId,
+    allowedUserIds,
     models: { jev: raw.models?.jev ?? "jev-1.13.0", openai: raw.models?.openai ?? "gpt-6-luna" },
     projects,
   };

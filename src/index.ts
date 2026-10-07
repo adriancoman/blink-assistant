@@ -115,7 +115,7 @@ async function handle(request: Request) {
   const { channel, threadTs, messageTs, user, text } = request;
   const reply = replyIn(channel, threadTs);
 
-  if (user !== config.allowedUserId) {
+  if (!user || !config.allowedUserIds.includes(user)) {
     await reply("Sorry, I only take requests from my owner.");
     return;
   }
@@ -191,11 +191,11 @@ app.message(async ({ message, context }) => {
   await handle({ channel: message.channel, threadTs: message.thread_ts, messageTs: message.ts, user: message.user, text: message.text });
 });
 
-// Shared checks for buttons: owner only, and the card's channel, ts and thread.
+// Shared checks for buttons: allowed users only, and the card's channel, ts and thread.
 function buttonContext(body: BlockAction) {
   const channel = body.channel?.id;
   const ts = body.message?.ts;
-  if (!channel || !ts || body.user.id !== config.allowedUserId) return null;
+  if (!channel || !ts || !config.allowedUserIds.includes(body.user.id)) return null;
   const threadTs = (body.message as { thread_ts?: string } | undefined)?.thread_ts ?? ts;
   const update = (text: string) => app.client.chat.update({ channel, ts, text, blocks: [] });
   return { channel, ts, threadTs, update };

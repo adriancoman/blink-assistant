@@ -17,6 +17,7 @@ describe("parseConfig", () => {
   it("fills in defaults", () => {
     const config = parseConfig({ allowedSlackUserId: "U1", projects: [myapp] }, env);
     const [p] = config.projects;
+    assert.deepEqual(config.allowedUserIds, ["U1"]);
     assert.deepEqual(config.models, { jev: "jev-1.13.0", openai: "gpt-6-luna" });
     assert.deepEqual(p.github, { owner: "acme", repo: "myapp-mobile", releaseBranch: "release" });
     assert.deepEqual(p.expo, {
@@ -89,6 +90,10 @@ describe("parseConfig", () => {
           err.message.includes(s),
         ),
     );
+  });
+
+  it("accepts a list of allowed users", () => {
+    assert.deepEqual(parseConfig({ allowedSlackUserId: ["U1", "U2"], projects: [myapp] }, env).allowedUserIds, ["U1", "U2"]);
   });
 
   it("requires the Expo token secret", () => {

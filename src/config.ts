@@ -42,7 +42,7 @@ export const config = {
   // Optional: offered as a fallback when Jev can't route a request.
   openaiApiKey: process.env.OPENAI_API_KEY || null,
   githubToken: githubToken(),
-  allowedUserId: file.allowedUserId,
+  allowedUserIds: file.allowedUserIds,
   // Pinned so behavior (and the confidence threshold tuned for it) only changes when we choose.
   jevModel: file.models.jev,
   openaiModel: file.models.openai,

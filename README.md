@@ -40,7 +40,7 @@ Nothing with side effects runs without a **Confirm** click, whichever model prop
 
 ## Safety model
 
-- **One user.** Blink ignores everyone except `allowedSlackUserId`.
+- **Allowed users only.** Blink ignores everyone not listed in `allowedSlackUserId`.
 - **The right project.** Every reply and Confirm card names the project when there's more than one, and Blink asks rather than guessing which project you meant.
 - **Confirm before acting.** Merges, releases, rollbacks and pauses are posted as Confirm / Cancel cards that expire after 30 minutes. Neither model can run anything itself.
 - **No invented branches.** Jev picks branches from the repo's real branch list, and the bot only accepts a branch that literally appears in your message. OpenAI's picks are checked against the same list.
@@ -201,7 +201,7 @@ Both copied files are gitignored, so your secrets and settings never get committ
 1. Go to https://api.slack.com/apps → **Create New App** → **From a manifest**, pick your workspace, and paste [`slack-app-manifest.yml`](slack-app-manifest.yml). It sets the name, permissions, events and Socket Mode for you.
 2. **Basic Information → App-Level Tokens → Generate Token and Scopes:** add the `connections:write` scope and generate. Copy the token (`xapp-…`) into `SLACK_APP_TOKEN` in `.env`.
 3. **Install App → Install to Workspace → Allow.** Copy the **Bot User OAuth Token** (`xoxb-…`) into `SLACK_BOT_TOKEN`. Don't use the User OAuth Token (`xoxp-`).
-4. **Your Slack member ID:** in Slack, open your profile → **⋮** → **Copy member ID** (`U…`). Put it in `allowedSlackUserId` in `release-bot.config.json`. Blink ignores everyone else.
+4. **Your Slack member ID:** in Slack, open your profile → **⋮** → **Copy member ID** (`U…`). Put it in `allowedSlackUserId` in `release-bot.config.json` (a list, `["U…", "U…"]`, lets several people use Blink). Blink ignores everyone else.
 5. Invite the bot to the channels where you'll use it: `/invite @blink`.
 
 If you change the app's permissions later, click **Reinstall to Workspace** so the token picks them up.
@@ -321,7 +321,7 @@ Blink can manage several projects. Each one only has the capabilities whose bloc
 
 | Setting | Required | What it is |
 |---|---|---|
-| `allowedSlackUserId` | yes | The only Slack user Blink listens to (profile → ⋯ → Copy member ID) |
+| `allowedSlackUserId` | yes | The Slack user Blink listens to (profile → ⋯ → Copy member ID), or a list of them |
 | `models.jev` / `models.openai` | no | Defaults `jev-1.13.0` (pinned, because the confidence threshold is tuned per model) and `gpt-6-luna` |
 | `projects[].id` | yes | Short, unique, lowercase |
 | `projects[].name`, `aliases` | no | How you refer to the project in messages. The id and name always count. |
