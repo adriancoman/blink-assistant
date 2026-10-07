@@ -6,7 +6,7 @@ import { lastWorkflowRun } from "./expo.ts";
 import { listBranches } from "./github.ts";
 import { channelState, planRollback, planStop } from "./ota.ts";
 import { hasExpo, hasGithub, type Project } from "./settings.ts";
-import { planVersion } from "./version.ts";
+import { planOtaVersion, planVersion } from "./version.ts";
 
 // OpenAI is only used when Jev can't route a request and the user asks for it. It can answer,
 // ask a question, or propose actions; proposals still go through the Confirm button. It only gets
@@ -43,14 +43,14 @@ function toolsFor(p: Project): { tools: FunctionTool[]; abilities: string[] } {
     const { otaChannel, workflows } = p.expo;
     if (workflows.ota) {
       tools.push(
-        tool("release_ota", `Propose publishing an iOS OTA update from ${releaseBranch} to ${otaChannel}. The user must confirm.`, {
+        tool("release_ota", `Propose publishing an OTA update from ${releaseBranch} to ${otaChannel}. The user must confirm.`, {
           type: "object",
           properties: { message: { type: "string", description: "Short update message. Use 'OTA update' if none was given." } },
           required: ["message"],
           additionalProperties: false,
         }),
       );
-      abilities.push(`- release_ota: publish an iOS over-the-air update from "${releaseBranch}" to the "${otaChannel}" channel.`);
+      abilities.push(`- release_ota: publish an over-the-air update from "${releaseBranch}" to the "${otaChannel}" channel.`);
     }
     if (workflows.testflight) {
       tools.push(
@@ -124,7 +124,7 @@ async function runTool(p: Project, call: ResponseFunctionToolCall, branches: str
   switch (call.name) {
     case "release_ota":
       if ((await channelState(p)).paused) return { result: `${p.expo.otaChannel} is paused; a new OTA wouldn't reach anyone. Tell the user to resume rollout first.` };
-      return { result: proposed, action: { kind: "release_ota", message: input.message || "OTA update" } };
+      return { result: proposed, action: { kind: "release_ota", message: input.message || "OTA update", version: await planOtaVersion(p) } };
     case "release_testflight": {
       if (p.expo.versioning === "none") return { result: proposed, action: { kind: "release_testflight", version: null, bumpFrom: null } };
       const plan = await planVersion(p, input.version || null);

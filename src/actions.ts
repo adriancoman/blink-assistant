@@ -2,13 +2,14 @@ import { runWorkflow, type StartedRun } from "./expo.ts";
 import { createBranch, deleteBranch, mergeBranches, readFile, writeFile } from "./github.ts";
 import { cancelRuns, republish, rollBackToEmbedded, setChannelPaused, type UpdateGroup } from "./ota.ts";
 import { type ExpoProject, type GithubProject, hasExpo, hasGithub, type Project } from "./settings.ts";
-import { compareVersions, readAppJsonVersion, setAppJsonVersion } from "./versioning.ts";
+import { compareVersions, countOta, readAppJsonVersion, setAppJsonVersion } from "./versioning.ts";
 
 // Actions with side effects. The models can only propose these; they run when the user clicks
 // Confirm, against the project the request was resolved to.
 export type Action =
   | { kind: "merge"; source: string; target: string }
-  | { kind: "release_ota"; message: string }
+  // version is what the update will show, for projects that count OTA updates ("minor"), else null.
+  | { kind: "release_ota"; message: string; version: string | null }
   // version and bumpFrom are null for projects whose workflow handles versions itself.
   | { kind: "release_testflight"; version: string | null; bumpFrom: string | null }
   | { kind: "release_android" }
@@ -40,11 +41,11 @@ export function describe(p: Project, action: Action): string {
     case "merge":
       return `Merge \`${action.source}\` into \`${action.target}\` (via PR, merged only if there are no conflicts)`;
     case "release_ota":
-      return `Publish an iOS OTA update from \`${branch}\` to the *${channel}* channel\n> ${action.message}`;
+      return `Publish an OTA update${action.version ? ` *${action.version}*` : ""} from \`${branch}\` to the *${channel}* channel\n> ${action.message}`;
     case "release_testflight":
       if (!action.version) return `Build iOS from \`${branch}\` and upload it to TestFlight`;
       return action.bumpFrom
-        ? `Bump the version ${action.bumpFrom} → *${action.version}* on \`${branch}\` (and \`main\` via PR), then build iOS and upload it to TestFlight`
+        ? `Bump the version ${action.bumpFrom} → *${action.version}* on \`${branch}\`${branch === "main" ? "" : " (and \`main\` via PR)"}, then build iOS and upload it to TestFlight`
         : `Build iOS *${action.version}* from \`${branch}\` and upload it to TestFlight`;
     case "release_android":
       return `Build Android from \`${branch}\` and upload it to Google Play`;
@@ -105,8 +106,18 @@ async function run(p: Project, action: Action): Promise<string | ExecuteResult> 
     case "release_ota": {
       const ex = expoOf(p);
       if (!ex.expo.workflows.ota) throw new Error(`OTA isn't set up for ${p.name}`);
-      const started = await runWorkflow(ex, ex.expo.workflows.ota, { message: action.message });
-      return { text: `OTA workflow started from \`${ex.github.releaseBranch}\`. <${started.url}|View run>`, watch: started };
+      const branch = ex.github.releaseBranch;
+      let message = action.message;
+      if (action.version) {
+        // Count the update on the release branch first, so the published app.json shows it.
+        const appJson = await readFile(ex, "app.json", branch);
+        const counted = countOta(appJson.content);
+        if (counted.version !== action.version) throw new Error(`The next OTA on \`${branch}\` is now ${counted.version}, not ${action.version}. Ask me again.`);
+        await writeFile(ex, "app.json", branch, counted.content, appJson.sha, `OTA ${action.version} — ${action.message}`);
+        message = `${action.version} — ${action.message}`;
+      }
+      const started = await runWorkflow(ex, ex.expo.workflows.ota, { message });
+      return { text: `OTA${action.version ? ` ${action.version}` : ""} workflow started from \`${branch}\`. <${started.url}|View run>`, watch: started };
     }
     case "release_testflight": {
       const ex = expoOf(p);
@@ -124,7 +135,7 @@ async function run(p: Project, action: Action): Promise<string | ExecuteResult> 
       const started = await runWorkflow(ex, ex.expo.workflows.testflight);
       lines.push(`iOS${action.version ? ` ${action.version}` : ""} build + TestFlight upload started. <${started.url}|View run>`);
       // Also when release was bumped by an earlier attempt whose build failed to start.
-      if (action.version) lines.push(await bumpMain(ex, action.version).catch((err) => `Couldn't bump \`main\`: ${String(err)}`));
+      if (action.version && branch !== "main") lines.push(await bumpMain(ex, action.version).catch((err) => `Couldn't bump \`main\`: ${String(err)}`));
       return { text: lines.join("\n"), watch: started };
     }
     case "release_android": {

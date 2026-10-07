@@ -13,7 +13,7 @@ function capabilities(p: Project): string[] {
     if (p.expo.workflows.ota) lines.push(`• *release an OTA* update to ${p.expo.otaChannel}`);
     lines.push(`• *roll back the OTA*, *stop rollout* (pause OTA delivery), *resume rollout*`);
     if (p.expo.workflows.testflight) {
-      lines.push(`• *release to TestFlight*${p.expo.versioning === "app-json" ? " (optionally with a version, e.g. _ship 1.1.0 to TestFlight_)" : ""}`);
+      lines.push(`• *release to TestFlight*${p.expo.versioning !== "none" ? " (optionally with a version, e.g. _ship 1.1.0 to TestFlight_)" : ""}`);
     }
     if (p.expo.workflows.android) lines.push(`• *release Android* (build and upload to Google Play)`);
     lines.push(`• show *status*`);

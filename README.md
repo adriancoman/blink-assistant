@@ -24,7 +24,7 @@ Nothing with side effects runs without a **Confirm** click, whichever model prop
 | Ask for | Example | What happens (after Confirm) |
 |---|---|---|
 | **Merge** | _merge main into release_, _main to release_ | Opens a PR and merges it if there are no conflicts. Otherwise it leaves the PR open and sends you the link. |
-| **OTA update** | _release an OTA_, _push an ota "fix the stars animation"_ | Publishes an iOS update from the release branch to the `production` channel. Quoted text becomes the update message. |
+| **OTA update** | _release an OTA_, _push an ota "fix the stars animation"_ | Publishes an update from the release branch to the `production` channel (the platforms are up to the workflow). Quoted text becomes the update message. With `minor` versioning it also counts the update (see [Versioning](#versioning)). |
 | **TestFlight** | _release to TestFlight_, _ship 4.1.0 to TestFlight_ | Bumps the version if needed (see [Versioning](#versioning)), then builds iOS and uploads it to App Store Connect. |
 | **Android release** | _release Android_, _build Android_ | Builds Android from the release branch and uploads it to Google Play (the track in `eas.json`'s `submit` profile). Only if `expo.workflows.android` is set. |
 | **Roll back the OTA** | _roll back the OTA_, _undo the last update_ | Republishes the previous production update with the same runtime, or rolls back to the code inside the store build. |
@@ -67,7 +67,9 @@ Apple only accepts a build whose version is above the live App Store version **a
 
 - **No version given:** it keeps the version in `app.json` if that's allowed, otherwise proposes the next patch above the highest known version.
 - **Version given:** it uses that, or refuses with the reason if it's too low.
-- **On Confirm:** it commits the bump to the release branch, starts the build, then opens a PR bumping `main` too.
+- **On Confirm:** it commits the bump to the release branch, starts the build, then opens a PR bumping `main` too (unless the release branch is `main`).
+
+**`minor` versioning** is for apps that show `major.minor.<OTA count>`. Every TestFlight build gets the next minor (`0.1.0` → `0.2.0`), unless the version in `app.json` has never been built (a retry). An app that isn't on the App Store yet is fine. Each OTA commits `expo.extra.ota = { "for": "<version>", "n": <count> }` to the release branch before publishing, and the update message starts with the version it shows (`0.2.3 — fix the stars`). The count starts over when `for` no longer matches `expo.version`, so a TestFlight bump resets it without touching it. Keep `extra` out of the runtime fingerprint (`fingerprint.config.js` with `SourceSkips.ExpoConfigExtraSection`), or each count would make a runtime no store build has.
 
 ## Requirements
 
@@ -332,7 +334,7 @@ Blink can manage several projects. Each one only has the capabilities whose bloc
 | `expo.otaChannel` | no | EAS Update channel for OTA, rollback and pause. Default `production` |
 | `expo.workflows.ota` / `.testflight` / `.android` | no | Workflow file names in `.eas/workflows/`. Set one to `null` if the project doesn't have it, and that command is turned off. `.android` defaults to `null`. |
 | `expo.tokenEnv` | no | Which `.env` secret holds this project's Expo token. Default `EXPO_TOKEN` |
-| `expo.versioning` | no | `app-json` (Blink bumps `expo.version` before TestFlight builds) or `none` (your workflow handles versions). Default `app-json` |
+| `expo.versioning` | no | `app-json` (Blink bumps `expo.version` before TestFlight builds), `minor` (TestFlight bumps the minor, OTA updates count as the patch; see [Versioning](#versioning)) or `none` (your workflow handles versions). Default `app-json` |
 | `expo.repoDir` | no | Where Blink keeps its clone. Default `./.repos/<id>` |
 | `posthog.host`, `posthog.projectId` | yes, with `posthog` | Your PostHog instance and project; `posthog.apiKeyEnv` names the secret (default `POSTHOG_API_KEY`) |
 

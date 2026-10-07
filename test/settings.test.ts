@@ -61,6 +61,13 @@ describe("parseConfig", () => {
     assert.equal(p.expo?.versioning, "none");
   });
 
+  it("accepts minor versioning and rejects unknown modes", () => {
+    const parse = (versioning: string) =>
+      parseConfig({ allowedSlackUserId: "U1", projects: [{ ...myapp, expo: { iosBundleId: "x", versioning } }] }, env);
+    assert.equal(parse("minor").projects[0].expo?.versioning, "minor");
+    assert.throws(() => parse("patch"), /"app-json", "minor" or "none"/);
+  });
+
   it("converts the old single-app format", () => {
     const config = parseConfig(
       { appName: "myapp-mobile", githubRepo: "acme/myapp-mobile", iosBundleId: "com.acme.myapp", allowedSlackUserId: "U1", releaseBranch: "release" },

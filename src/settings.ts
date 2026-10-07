@@ -9,8 +9,9 @@ export type ExpoSettings = {
   // null means the command isn't set up for this project.
   workflows: { ota: string | null; testflight: string | null; android: string | null };
   token: string;
-  // "app-json": Blink bumps expo.version in app.json; "none": the workflow handles versions.
-  versioning: "app-json" | "none";
+  // "app-json": Blink bumps expo.version in app.json; "minor": Blink bumps the minor for TestFlight
+  // and counts OTA updates as the patch (see chooseMinorVersion); "none": the workflow handles versions.
+  versioning: "app-json" | "minor" | "none";
   repoDir: string;
 };
 
@@ -108,7 +109,7 @@ export function parseConfig(input: Raw, env: Env): Config {
       if (!p.github) problems.push(`${where}: "expo" also needs a "github" block`);
       if (!isString(p.expo.iosBundleId)) problems.push(`${where}: "expo.iosBundleId" is required`);
       const versioning = p.expo.versioning ?? "app-json";
-      if (versioning !== "app-json" && versioning !== "none") problems.push(`${where}: "expo.versioning" must be "app-json" or "none"`);
+      if (!["app-json", "minor", "none"].includes(versioning)) problems.push(`${where}: "expo.versioning" must be "app-json", "minor" or "none"`);
       const workflow = (key: "ota" | "testflight" | "android", fallback: string | null) =>
         p.expo.workflows && key in p.expo.workflows ? (isString(p.expo.workflows[key]) ? p.expo.workflows[key] : null) : fallback;
       project.expo = {

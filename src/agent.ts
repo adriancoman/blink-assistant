@@ -8,7 +8,7 @@ import { MIN_CONFIDENCE, NOT_MENTIONED, otaMessage, pickBranch, versionInText } 
 import * as replies from "./replies.ts";
 import { hasExpo, hasGithub, type Project } from "./settings.ts";
 import { askInThread } from "./posthog.ts";
-import { planVersion } from "./version.ts";
+import { planOtaVersion, planVersion } from "./version.ts";
 
 const client = new TypeSafeClient({ apiKey: config.typesafeApiKey, defaultModel: config.jevModel });
 
@@ -166,7 +166,7 @@ export async function respond(p: Project, history: string[], userText: string, c
       }
       if (isOta) {
         if ((await channelState(p)).paused) return reply(replies.otaWhilePaused(p));
-        return propose({ kind: "release_ota", message: otaMessage(userText) });
+        return propose({ kind: "release_ota", message: otaMessage(userText), version: await planOtaVersion(p) });
       }
       if (p.expo.versioning === "none") return propose({ kind: "release_testflight", version: null, bumpFrom: null });
       try {
