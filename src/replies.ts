@@ -37,6 +37,8 @@ export const notUnderstood = (p: Project) => help(p, "Sorry, I'm not sure what y
 
 export const notConfigured = (p: Project, what: string) => `${what} isn't set up for *${p.name}*. ${help(p)}`;
 
+export const posthogFailed = (err: unknown) => `:warning: ${err instanceof Error ? err.message : String(err)}`;
+
 export const askingPosthog = (p: Project) => `🔍 Asking PostHog AI about *${p.name}*… this usually takes 20–60 seconds.`;
 
 export const askProject = (prefix = "") => `${prefix}Which project is this for?`;

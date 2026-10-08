@@ -150,7 +150,12 @@ export async function respond(p: Project, history: string[], userText: string, c
       const { posthog } = p;
       if (!posthog) return reply(replies.notConfigured(p, "PostHog"));
       await ctx.progress(replies.askingPosthog(p));
-      return reply(await askInThread({ ...p, posthog }, ctx.threadKey, userText));
+      try {
+        return reply(await askInThread({ ...p, posthog }, ctx.threadKey, userText));
+      } catch (err) {
+        console.error(err);
+        return reply(replies.posthogFailed(err));
+      }
     }
 
     case "release_ota":

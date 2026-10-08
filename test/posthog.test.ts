@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
-import { finalAnswer, markdownToSlack } from "../src/posthog.ts";
+import { answerInConversation, finalAnswer, markdownToSlack } from "../src/posthog.ts";
 
 // A trimmed recording of a real PostHog AI response: the question, a tool call, the tool result,
 // a partial snapshot of the answer, and the final answer.
@@ -25,6 +25,28 @@ describe("finalAnswer", () => {
 
   it("skips malformed events", () => {
     assert.equal(finalAnswer("event: message\ndata: {not json\n\nevent: message\ndata: " + JSON.stringify({ type: "ai", content: "ok" })), "ok");
+  });
+});
+
+describe("answerInConversation", () => {
+  const earlier = [
+    { type: "human", content: "how many users?" },
+    { type: "ai", content: "42 users." },
+  ];
+
+  it("returns the answer to the latest question", () => {
+    const messages = [...earlier, { type: "human", content: "and signups?" }, { type: "ai", content: "", tool_calls: [{}] }, { type: "ai", content: "7 signups." }];
+    assert.deepEqual(answerInConversation(messages, "and signups?"), { asked: true, answer: "7 signups." });
+  });
+
+  it("doesn't return an earlier answer while the latest question is still being worked on", () => {
+    const messages = [...earlier, { type: "human", content: "and signups?" }, { type: "ai", content: "Let me check.", tool_calls: [{}] }];
+    assert.deepEqual(answerInConversation(messages, "and signups?"), { asked: true, answer: null });
+  });
+
+  it("notices when the question never reached PostHog", () => {
+    assert.deepEqual(answerInConversation(earlier, "and signups?"), { asked: false, answer: null });
+    assert.deepEqual(answerInConversation([], "and signups?"), { asked: false, answer: null });
   });
 });
 
