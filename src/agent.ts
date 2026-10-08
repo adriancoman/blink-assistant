@@ -1,7 +1,7 @@
 import { type ChoiceResponse, choice, noul, type Questions, TypeSafeClient } from "@typesafe-ai/sdk";
 import type { Action } from "./actions.ts";
 import { config } from "./config.ts";
-import { lastWorkflowRun } from "./expo.ts";
+import { type LastRun, lastFailure, lastWorkflowRun, type RunFailure } from "./expo.ts";
 import { listBranches } from "./github.ts";
 import { channelState, planRollback, planStop } from "./ota.ts";
 import { MIN_CONFIDENCE, NOT_MENTIONED, otaMessage, pickBranch, versionInText } from "./parsing.ts";
@@ -26,6 +26,7 @@ export const INTENTS = {
   release_testflight: "Build the iOS app and upload it to TestFlight (an iOS build)",
   release_android: "Build the Android app and upload it to Google Play (an Android build)",
   status: "Show the status of the latest build or workflow run",
+  explain_failure: "Asks why a build, release or workflow run failed, what its error was, or to see its logs",
   app_store_release: "Submit to the App Store, send for App Store review, or release the app to users in the App Store",
   help: "Asks what the bot can do, which commands it has, or for help",
   analytics: "A question about product analytics or usage data: users, events, signups, retention, conversion, traffic, funnels",
@@ -70,15 +71,17 @@ export async function classifyIntent(history: string[], userText: string): Promi
 }
 
 // `notUnderstood` marks replies where Jev couldn't route the request, so the caller can offer a fallback.
-export type AgentResult = { text: string; actions: Action[]; notUnderstood?: boolean };
+// `explain` is a failed run the reply shows, which OpenAI can explain if the user asks.
+export type Explain = { run: LastRun; failure: RunFailure };
+export type AgentResult = { text: string; actions: Action[]; notUnderstood?: boolean; explain?: Explain };
 
 const reply = (text: string): AgentResult => ({ text, actions: [] });
 const propose = (action: Action): AgentResult => ({ text: "", actions: [action] });
 
 // Runs one user turn for a resolved project. `history` is the thread's user messages.
-// Context from Slack: which thread this is (for PostHog AI follow-ups) and a way to post a quick
-// "working on it" note before slow steps.
-export type TurnContext = { threadKey: string; progress: (text: string) => Promise<unknown> };
+// Context from Slack: which thread this is (for PostHog AI follow-ups), the workflow run last started
+// from it, and a way to post a quick "working on it" note before slow steps.
+export type TurnContext = { threadKey: string; threadRunId: string | null; progress: (text: string) => Promise<unknown> };
 
 export async function respond(p: Project, history: string[], userText: string, ctx: TurnContext): Promise<AgentResult> {
   const turns = history.slice(-MAX_TURNS);
@@ -109,6 +112,13 @@ export async function respond(p: Project, history: string[], userText: string, c
         const [run, channel] = await Promise.all([lastWorkflowRun(p), channelState(p)]);
         return reply(replies.status(p, run, channel.paused));
       }
+
+    case "explain_failure": {
+      if (!hasExpo(p)) return reply(replies.notConfigured(p, "Build status"));
+      const found = await lastFailure(p, ctx.threadRunId);
+      const { failed, failure } = found;
+      return { text: replies.lastFailure(found), actions: [], explain: failed && failure ? { run: failed, failure } : undefined };
+    }
 
     case "rollback_ota": {
       if (!hasExpo(p)) return reply(replies.notConfigured(p, "OTA"));

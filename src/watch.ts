@@ -1,4 +1,4 @@
-import { FINISHED_STATUSES, runDetails, type StartedRun } from "./expo.ts";
+import { FINISHED_STATUSES, runDetails, runFailure, type StartedRun } from "./expo.ts";
 import * as replies from "./replies.ts";
 import type { ExpoProject } from "./settings.ts";
 
@@ -17,7 +17,8 @@ export function watchRun(p: ExpoProject, run: StartedRun, report: (message: stri
       const details = await runDetails(p, run.id);
       failedPolls = 0;
       if (FINISHED_STATUSES.has(details.status)) {
-        await report(replies.status(p, details));
+        // A failure comes with the end of the failing step's log, so there's no need to ask.
+        await report(details.status === "FAILURE" ? replies.failedRun(details, await runFailure(p, details)) : replies.status(p, details));
         return;
       }
     } catch (err) {

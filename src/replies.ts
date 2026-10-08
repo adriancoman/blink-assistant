@@ -1,4 +1,5 @@
-import type { LastRun } from "./expo.ts";
+import type { LastFailure, LastRun, RunFailure } from "./expo.ts";
+import { excerpt } from "./logs.ts";
 import type { Project } from "./settings.ts";
 
 // Jev only makes decisions, so every reply is a template.
@@ -16,7 +17,7 @@ function capabilities(p: Project): string[] {
       lines.push(`• *release to TestFlight*${p.expo.versioning !== "none" ? " (optionally with a version, e.g. _ship 1.1.0 to TestFlight_)" : ""}`);
     }
     if (p.expo.workflows.android) lines.push(`• *release Android* (build and upload to Google Play)`);
-    lines.push(`• show *status*`);
+    lines.push(`• show *status*, or *why the last build failed*`);
   }
   if (p.posthog) lines.push(`• answer *analytics questions* with PostHog AI (e.g. _how many signups this week?_)`);
   return lines;
@@ -72,14 +73,50 @@ const pausedNote = (p: Project) =>
 export const otaWhilePaused = (p: Project) =>
   `The *${p.expo?.otaChannel}* channel is paused, so a new OTA wouldn't reach anyone. Say _resume rollout_ first.`;
 
-export function status(p: Project, run: LastRun | null, paused = false) {
-  if (!run) return `No builds yet.${paused ? pausedNote(p) : ""}`;
+// The run's result, version and timing, without the link.
+function runSummary(run: LastRun) {
   const version = run.version ? ` · ${run.version}${run.buildNumber ? ` (build ${run.buildNumber})` : ""}` : "";
-  const failedAt = run.failedSteps.length ? ` at *${run.failedSteps.join(", ")}*` : "";
+  const failedAt = run.failedJobs.length ? ` at *${run.failedJobs.map((j) => j.name).join(", ")}*` : "";
   const timing = !run.startedAt
     ? ""
     : run.finishedAt
       ? `\nStarted ${run.startedAt.slice(0, 16).replace("T", " ")} UTC · took ${minutesBetween(run.startedAt, run.finishedAt)} min`
       : `\nStarted ${minutesBetween(run.startedAt, new Date().toISOString())} min ago`;
-  return `${runEmoji[run.status] ?? "•"} *${run.workflow}* ${runVerb[run.status] ?? run.status.toLowerCase()}${failedAt}${version}${timing}\n<${run.url}|View run>${paused ? pausedNote(p) : ""}`;
+  return `${runEmoji[run.status] ?? "•"} *${run.workflow}* ${runVerb[run.status] ?? run.status.toLowerCase()}${failedAt}${version}${timing}`;
+}
+
+export function status(p: Project, run: LastRun | null, paused = false) {
+  if (!run) return `No builds yet.${paused ? pausedNote(p) : ""}`;
+  return `${runSummary(run)}\n<${run.url}|View run>${paused ? pausedNote(p) : ""}`;
+}
+
+// Small enough that a reply with an OpenAI button stays under Slack's 3000-character section limit.
+export const SLACK_LOG_LINES = 15;
+const MAX_LOG_LINE = 150;
+
+// Log text inside a code block: Slack still reads &, < and > as markup there.
+const escapeLog = (line: string) =>
+  (line.length > MAX_LOG_LINE ? `${line.slice(0, MAX_LOG_LINE - 1)}…` : line)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/```/g, "'''");
+
+// A failed run with its failing step and the end of that step's log.
+export function failedRun(run: LastRun, failure: RunFailure | null) {
+  const log = failure?.lines.length ? `\n\`\`\`\n${excerpt(failure.lines, SLACK_LOG_LINES).map(escapeLog).join("\n")}\n\`\`\`` : "";
+  const detail = failure
+    ? `\nFailed step: *${failure.step}*${run.failedJobs.length > 1 ? ` (in ${failure.job})` : ""}${log}`
+    : "\nI couldn't find the error in the logs.";
+  return `${runSummary(run)}${detail}\n<${run.url}|View run>`;
+}
+
+// For "why did it fail?". When the latest run didn't fail, it says so and shows the last one that did.
+export function lastFailure({ latest, failed, failure, fromThread }: LastFailure) {
+  if (!failed) {
+    if (!latest) return "No builds yet.";
+    return `${fromThread ? "This thread's run hasn't failed:" : "No workflow run has failed. The latest:"}\n${runSummary(latest)}\n<${latest.url}|View run>`;
+  }
+  const note = latest && latest.id !== failed.id ? `The latest run, *${latest.workflow}*, ${runVerb[latest.status] ?? latest.status.toLowerCase()}. The last one that failed:\n` : "";
+  return `${note}${failedRun(failed, failure)}`;
 }

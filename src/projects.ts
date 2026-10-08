@@ -51,6 +51,7 @@ const SUPPORTS: Record<string, (p: Project) => boolean> = {
   stop_rollout: (p) => Boolean(p.github && p.expo),
   resume_rollout: (p) => Boolean(p.github && p.expo),
   status: (p) => Boolean(p.github && p.expo),
+  explain_failure: (p) => Boolean(p.github && p.expo),
   app_store_release: (p) => Boolean(p.github && p.expo),
   analytics: (p) => Boolean(p.posthog),
 };

@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { App, type BlockAction, type ButtonAction } from "@slack/bolt";
 import { type Action, describe, execute } from "./actions.ts";
-import { type AgentResult, classifyIntent, respond } from "./agent.ts";
+import { type AgentResult, classifyIntent, type Explain, respond } from "./agent.ts";
 import { config } from "./config.ts";
 import { askOpenAI, fallbackAvailable } from "./fallback.ts";
 import { namedInThread, pickByCapability, resolveProject } from "./projects.ts";
@@ -12,11 +12,12 @@ import { watchRun } from "./watch.ts";
 const app = new App({ token: config.slackBotToken, appToken: config.slackAppToken, socketMode: true });
 
 // In memory: a restart forgets conversations and unconfirmed actions, which is fine for one user.
-type Thread = { projectId: string | null; messages: string[] };
+// `run` is the workflow run last started from the thread, so "why did it fail?" explains that one.
+type Thread = { projectId: string | null; messages: string[]; run?: { projectId: string; id: string } };
 const threads = new Map<string, Thread>();
 const pending = new Map<string, { projectId: string; action: Action; createdAt: number }>();
-// Requests Jev couldn't route, kept so the "Ask OpenAI" button can hand them over.
-const unrouted = new Map<string, { projectId: string; messages: string[]; createdAt: number }>();
+// Requests Jev couldn't route (or failures to explain), kept so the OpenAI button can hand them over.
+const unrouted = new Map<string, { projectId: string; messages: string[]; explain?: Explain; threadTs: string; createdAt: number }>();
 // Messages waiting for the user to pick a project.
 const unassigned = new Map<string, { request: Request; createdAt: number }>();
 const PENDING_TTL_MS = 30 * 60 * 1000;
@@ -88,6 +89,9 @@ async function runAction(p: Project, action: Action, origin: Origin, show: (text
     const result = await execute(p, action);
     await show(`✅ ${label(p)}${result.text}`);
     if (result.watch && hasExpo(p)) {
+      const thread = threads.get(origin.threadTs) ?? { projectId: p.id, messages: [] };
+      thread.run = { projectId: p.id, id: result.watch.id };
+      threads.set(origin.threadTs, thread);
       // Reply in the same thread and mention the user, so the result shows up as a notification.
       watchRun(p, result.watch, (message) =>
         app.client.chat.postMessage({
@@ -114,17 +118,24 @@ async function runNow(p: Project, action: Action, origin: Origin) {
   });
 }
 
-// Posts a result: the reply text (with an "Ask OpenAI" button when Jev couldn't route the request),
-// then each proposed action: run right away if the autonomy setting allows, else a Confirm / Cancel card.
-// `confirmAll` asks for every action regardless of the setting.
+// Posts a result: the reply text (with an OpenAI button when Jev couldn't route the request, or to
+// explain a failed run), then each proposed action: run right away if the autonomy setting allows,
+// else a Confirm / Cancel card. `confirmAll` asks for every action regardless of the setting.
 async function postResult(reply: Reply, p: Project, result: AgentResult, messages: string[], origin: Origin, confirmAll = false) {
   const text = result.text ? `${label(p)}${result.text}` : "";
-  if (result.notUnderstood && fallbackAvailable) {
+  const offer = !fallbackAvailable
+    ? null
+    : result.notUnderstood
+      ? { note: "\n\nOr I can ask OpenAI to figure it out.", button: "Ask OpenAI" }
+      : result.explain
+        ? { note: "", button: "Explain with OpenAI" }
+        : null;
+  if (offer) {
     const id = randomUUID();
-    unrouted.set(id, { projectId: p.id, messages: [...messages], createdAt: Date.now() });
+    unrouted.set(id, { projectId: p.id, messages: [...messages], explain: result.explain, threadTs: origin.threadTs, createdAt: Date.now() });
     await reply(text, [
-      { type: "section", text: { type: "mrkdwn", text: `${text}\n\nOr I can ask OpenAI to figure it out.` } },
-      buttons(button("Ask OpenAI", "ask_openai", id)),
+      { type: "section", text: { type: "mrkdwn", text: `${text}${offer.note}` } },
+      buttons(button(offer.button, "ask_openai", id)),
     ]);
   } else if (text) {
     await reply(text);
@@ -144,6 +155,9 @@ async function postResult(reply: Reply, p: Project, result: AgentResult, message
   }
 }
 
+// The run started from the thread, if it was for this project.
+const threadRun = (thread: Thread, p: Project) => (thread.run?.projectId === p.id ? thread.run.id : null);
+
 type Request = { channel: string; threadTs: string; messageTs: string; user?: string; text: string };
 
 const replyIn = (channel: string, threadTs: string): Reply => (message, blocks) =>
@@ -156,7 +170,8 @@ async function handleFor(p: Project, request: Request, thread: Thread) {
   thread.projectId = p.id;
   try {
     const progress = (note: string) => reply(`${label(p)}${note}`);
-    const result = await respond(p, thread.messages, text, { threadKey: `${channel}:${threadTs}`, progress });
+    const threadRunId = threadRun(thread, p);
+    const result = await respond(p, thread.messages, text, { threadKey: `${channel}:${threadTs}`, threadRunId, progress });
     await postResult(reply, p, result, thread.messages.slice(-5), { channel, threadTs, userId: user ?? "" });
     await react("remove", channel, messageTs, WORKING);
   } catch (err) {
@@ -326,16 +341,19 @@ app.action<BlockAction<ButtonAction>>("ask_openai", async ({ ack, body, action }
     return;
   }
 
-  await ctx.update("⏳ Asking OpenAI…");
+  // An explanation keeps the logs it explains; a reply to an unrouted request is replaced.
+  const kept = entry.explain ? `${body.message?.text ?? ""}\n\n` : "";
+  await ctx.update(`${kept}⏳ Asking OpenAI…`);
   try {
-    const result = await askOpenAI(p, entry.messages);
-    await ctx.update("🤖 Asked OpenAI:");
+    const thread = threads.get(entry.threadTs);
+    const result = await askOpenAI(p, entry.messages, { explain: entry.explain, threadRunId: thread ? threadRun(thread, p) : null });
+    await ctx.update(`${kept}🤖 Asked OpenAI:`);
     // OpenAI's reply is shown as-is; any action it proposes still needs Confirm.
     const origin = { channel: ctx.channel, threadTs: ctx.threadTs, userId: body.user.id };
     await postResult(replyIn(ctx.channel, ctx.threadTs), p, { text: result.text, actions: result.actions }, entry.messages, origin, true);
   } catch (err) {
     console.error(err);
-    await ctx.update(`❌ OpenAI couldn't help: \`${String(err)}\``);
+    await ctx.update(`${kept}❌ OpenAI couldn't help: \`${String(err)}\``);
   }
 });
 

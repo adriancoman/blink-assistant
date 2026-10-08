@@ -5,7 +5,7 @@
 Under the hood it pairs two kinds of model:
 
 - **[Jev](https://docs.typesafe.ai/introduction)** (TypeSafe AI) handles every message. Jev doesn't write text: it answers typed questions ("which command is this?", "which of these branches is the source?") with probabilities, in about half a second, for a fraction of a cent. The bot turns its answers into actions and fixed reply templates.
-- **OpenAI** is an optional fallback. When Jev can't make sense of a message, the bot offers an **Ask OpenAI** button. OpenAI gets the same commands as tools, so it can handle odd phrasing or answer a question, but it's only called when you click.
+- **OpenAI** is an optional fallback. When Jev can't make sense of a message, the bot offers an **Ask OpenAI** button. OpenAI gets the same commands as tools, so it can handle odd phrasing or answer a question, but it's only called when you click. The same goes for **Explain with OpenAI** under a failed run's log.
 
 By default, nothing with side effects runs without a **Confirm** click, whichever model proposed it. The `autonomy` setting can let Jev's actions run right away.
 
@@ -31,11 +31,12 @@ By default, nothing with side effects runs without a **Confirm** click, whicheve
 | **Stop rollout** | _stop rollout_, _pause the OTA_ | Cancels a running OTA workflow before it publishes and pauses the `production` channel, so phones that don't have the update yet won't get it. |
 | **Resume rollout** | _resume rollout_ | Unpauses the `production` channel. |
 | **Status** | _status_, _how did the last build go?_ | The latest workflow run: result, failed step, version, duration, link, and whether `production` is paused. |
+| **Why it failed** | _what's the error?_, _why did the build fail?_, _show me the logs_ | The latest failed run (and whether a newer one has run since), its failing step, and the lines of that step's log around the error, from `eas workflow:logs`. With an OpenAI key, an **Explain with OpenAI** button sends more of the log to OpenAI for the likely cause and fix. Read-only, so no Confirm. |
 | **Analytics question** | _how many signups this week?_, _and compared to last week?_ | Asks PostHog AI about the project's PostHog data and posts its answer (usually 20–60 seconds). Follow-ups in the thread continue the same PostHog AI conversation. Read-only, so no Confirm. Needs a `posthog` block. |
 | **App Store release** | _submit to the App Store_ | Not supported (yet). The bot says so and offers TestFlight. |
 
 - Follow-ups in a thread don't need another @mention (_merge main_ → _into release_).
-- After an OTA or TestFlight release starts, the bot checks the run every 30 seconds and posts ✅ or ❌ in the thread, mentioning you.
+- After an OTA or TestFlight release starts, the bot checks the run every 30 seconds and posts ✅ or ❌ in the thread, mentioning you. A ❌ comes with the failing step and its log, like _why did it fail?_.
 - While it's working, your message gets a ⏳ reaction, and a ❌ if something fails unexpectedly.
 
 ## Safety model
@@ -372,6 +373,7 @@ npm test           # pure logic only; no credentials needed
 | `src/actions.ts` | What each confirmed action does |
 | `src/versioning.ts`, `src/version.ts` | Version rules, and fetching the live and built versions |
 | `src/ota.ts` | OTA controls: pause/resume, cancel a publish, roll back |
+| `src/logs.ts` | Finding the failing step and the error lines in a job's EAS logs |
 | `src/watch.ts` | Follows a started workflow run and reports when it finishes |
 | `src/expo.ts`, `src/repo.ts` | EAS CLI calls and the bot's clone of the app repo |
 | `src/github.ts` | GitHub API: branches, PRs, merges, file commits |
