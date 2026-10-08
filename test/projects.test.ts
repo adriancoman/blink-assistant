@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { pickByCapability, resolveProject } from "../src/projects.ts";
+import { namedInThread, pickByCapability, resolveProject } from "../src/projects.ts";
 import type { Project } from "../src/settings.ts";
 
 const project = (id: string, name: string, slackChannels: string[] = [], aliases: string[] = []): Project => ({
@@ -98,9 +98,26 @@ describe("pickByCapability", () => {
     assert.equal(pickByCapability(all, "release_ota", "pmgems"), app);
   });
 
-  it("returns null (ask) when several or no projects can, or the intent is unknown", () => {
+  it("keeps the thread's project when the request is unclear or nothing can do it", () => {
+    assert.equal(pickByCapability(all, null, "myapp"), app);
+    assert.equal(pickByCapability([gems], "release_testflight", "pmgems"), gems);
+  });
+
+  it("returns null (ask) when several or no projects can, or the intent is unknown, without a thread project", () => {
     assert.equal(pickByCapability(all, "merge", null), null);
     assert.equal(pickByCapability([gems], "release_testflight", null), null);
-    assert.equal(pickByCapability(all, null, "myapp"), null);
+    assert.equal(pickByCapability(all, null, null), null);
+  });
+});
+
+describe("namedInThread", () => {
+  it("uses the most recent earlier message that names exactly one project", () => {
+    assert.equal(namedInThread(projects, ["release myapp to testflight", "and the website?", "merge main into release"]), web);
+  });
+
+  it("skips messages naming several projects, and returns null when none name one", () => {
+    assert.equal(namedInThread(projects, ["myapp is fine", "compare myapp and website"]), myapp);
+    assert.equal(namedInThread(projects, ["the webhook failed"]), null);
+    assert.equal(namedInThread(projects, []), null);
   });
 });

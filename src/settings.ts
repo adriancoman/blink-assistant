@@ -35,8 +35,19 @@ export type ExpoProject = Project & { github: GithubSettings; expo: ExpoSettings
 export const hasGithub = (p: Project): p is GithubProject => Boolean(p.github);
 export const hasExpo = (p: Project): p is ExpoProject => Boolean(p.github && p.expo);
 
+// Which actions run without a Confirm click: "none" asks for every action, "partial" only for
+// releases (OTA, TestFlight, Android), "full" for none.
+export const AUTONOMY = ["none", "partial", "full"] as const;
+export type Autonomy = (typeof AUTONOMY)[number];
+
+const RELEASES = ["release_ota", "release_testflight", "release_android"];
+
+export const needsConfirm = (autonomy: Autonomy, actionKind: string) =>
+  autonomy === "none" || (autonomy === "partial" && RELEASES.includes(actionKind));
+
 export type Config = {
   allowedUserIds: string[];
+  autonomy: Autonomy;
   models: { jev: string; openai: string };
   projects: Project[];
 };
@@ -51,6 +62,7 @@ function fromLegacy(raw: Raw): Raw {
   const id = String(raw.appName ?? "app").toLowerCase().replace(/[^a-z0-9]+/g, "-");
   return {
     allowedSlackUserId: raw.allowedSlackUserId,
+    autonomy: raw.autonomy,
     models: raw.models,
     projects: [
       {
@@ -75,6 +87,8 @@ export function parseConfig(input: Raw, env: Env): Config {
   // One member ID, or a list of them.
   const allowedUserIds = [raw.allowedSlackUserId].flat().filter(isString);
   if (!allowedUserIds.length) problems.push(`"allowedSlackUserId" is required (a Slack member ID, or a list of them)`);
+  const autonomy = raw.autonomy ?? "none";
+  if (!AUTONOMY.includes(autonomy)) problems.push(`"autonomy" must be "none", "partial" or "full"`);
   if (!Array.isArray(raw.projects) || raw.projects.length === 0) problems.push(`"projects" must list at least one project`);
 
   const secret = (name: string, where: string) => {
@@ -144,6 +158,7 @@ export function parseConfig(input: Raw, env: Env): Config {
   if (problems.length) throw new Error(problems.join("; "));
   return {
     allowedUserIds,
+    autonomy,
     models: { jev: raw.models?.jev ?? "jev-1.13.0", openai: raw.models?.openai ?? "gpt-6-luna" },
     projects,
   };

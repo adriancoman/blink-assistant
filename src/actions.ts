@@ -5,7 +5,7 @@ import { type ExpoProject, type GithubProject, hasExpo, hasGithub, type Project 
 import { compareVersions, countOta, readAppJsonVersion, setAppJsonVersion } from "./versioning.ts";
 
 // Actions with side effects. The models can only propose these; they run when the user clicks
-// Confirm, against the project the request was resolved to.
+// Confirm (or right away, if the autonomy setting allows), against the project the request was resolved to.
 export type Action =
   | { kind: "merge"; source: string; target: string }
   // version is what the update will show, for projects that count OTA updates ("minor"), else null.

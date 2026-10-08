@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { hasExpo, hasGithub, parseConfig } from "../src/settings.ts";
+import { hasExpo, hasGithub, needsConfirm, parseConfig } from "../src/settings.ts";
 
 const env = { EXPO_TOKEN: "expo", EXPO_TOKEN_OTHER: "other", POSTHOG_API_KEY: "ph" };
 
@@ -18,6 +18,7 @@ describe("parseConfig", () => {
     const config = parseConfig({ allowedSlackUserId: "U1", projects: [myapp] }, env);
     const [p] = config.projects;
     assert.deepEqual(config.allowedUserIds, ["U1"]);
+    assert.equal(config.autonomy, "none");
     assert.deepEqual(config.models, { jev: "jev-1.13.0", openai: "gpt-6-luna" });
     assert.deepEqual(p.github, { owner: "acme", repo: "myapp-mobile", releaseBranch: "release" });
     assert.deepEqual(p.expo, {
@@ -105,5 +106,22 @@ describe("parseConfig", () => {
 
   it("requires the Expo token secret", () => {
     assert.throws(() => parseConfig({ allowedSlackUserId: "U1", projects: [myapp] }, {}), /EXPO_TOKEN/);
+  });
+});
+
+describe("autonomy", () => {
+  it("reads the setting and rejects unknown levels", () => {
+    assert.equal(parseConfig({ allowedSlackUserId: "U1", autonomy: "partial", projects: [myapp] }, env).autonomy, "partial");
+    assert.throws(() => parseConfig({ allowedSlackUserId: "U1", autonomy: "yolo", projects: [myapp] }, env), /"autonomy" must be/);
+  });
+
+  it("none confirms everything, full nothing", () => {
+    assert.equal(needsConfirm("none", "rollback_ota"), true);
+    assert.equal(needsConfirm("full", "release_testflight"), false);
+  });
+
+  it("partial confirms releases only", () => {
+    for (const kind of ["release_ota", "release_testflight", "release_android"]) assert.equal(needsConfirm("partial", kind), true);
+    for (const kind of ["merge", "rollback_ota", "stop_rollout", "resume_rollout"]) assert.equal(needsConfirm("partial", kind), false);
   });
 });

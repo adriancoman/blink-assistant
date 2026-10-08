@@ -43,6 +43,7 @@ export const config = {
   openaiApiKey: process.env.OPENAI_API_KEY || null,
   githubToken: githubToken(),
   allowedUserIds: file.allowedUserIds,
+  autonomy: file.autonomy,
   // Pinned so behavior (and the confidence threshold tuned for it) only changes when we choose.
   jevModel: file.models.jev,
   openaiModel: file.models.openai,

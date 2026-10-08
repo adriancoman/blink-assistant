@@ -7,7 +7,7 @@ Under the hood it pairs two kinds of model:
 - **[Jev](https://docs.typesafe.ai/introduction)** (TypeSafe AI) handles every message. Jev doesn't write text: it answers typed questions ("which command is this?", "which of these branches is the source?") with probabilities, in about half a second, for a fraction of a cent. The bot turns its answers into actions and fixed reply templates.
 - **OpenAI** is an optional fallback. When Jev can't make sense of a message, the bot offers an **Ask OpenAI** button. OpenAI gets the same commands as tools, so it can handle odd phrasing or answer a question, but it's only called when you click.
 
-Nothing with side effects runs without a **Confirm** click, whichever model proposed it.
+By default, nothing with side effects runs without a **Confirm** click, whichever model proposed it. The `autonomy` setting can let Jev's actions run right away.
 
 ## Contents
 - [What you can ask](#what-you-can-ask)
@@ -21,7 +21,7 @@ Nothing with side effects runs without a **Confirm** click, whichever model prop
 
 ## What you can ask
 
-| Ask for | Example | What happens (after Confirm) |
+| Ask for | Example | What happens (after Confirm, unless `autonomy` skips it) |
 |---|---|---|
 | **Merge** | _merge main into release_, _main to release_ | Opens a PR and merges it if there are no conflicts. Otherwise it leaves the PR open and sends you the link. |
 | **OTA update** | _release an OTA_, _push an ota "fix the stars animation"_ | Publishes an update from the release branch to the `production` channel (the platforms are up to the workflow). Quoted text becomes the update message. With `minor` versioning it also counts the update (see [Versioning](#versioning)). |
@@ -42,7 +42,7 @@ Nothing with side effects runs without a **Confirm** click, whichever model prop
 
 - **Allowed users only.** Blink ignores everyone not listed in `allowedSlackUserId`.
 - **The right project.** Every reply and Confirm card names the project when there's more than one, and Blink asks rather than guessing which project you meant.
-- **Confirm before acting.** Merges, releases, rollbacks and pauses are posted as Confirm / Cancel cards that expire after 30 minutes. Neither model can run anything itself.
+- **Confirm before acting.** Merges, releases, rollbacks and pauses are posted as Confirm / Cancel cards that expire after 30 minutes. Neither model can run anything itself. With `autonomy` set to `partial` (releases still need Confirm) or `full`, Jev's actions run right away and post ⏳ then ✅ or ❌. Actions OpenAI proposes always need Confirm.
 - **No invented branches.** Jev picks branches from the repo's real branch list, and the bot only accepts a branch that literally appears in your message. OpenAI's picks are checked against the same list.
 - **Ask, don't guess.** Below 0.6 confidence the bot asks a question instead of acting.
 - **Releases only from the release branch.** Asking to release from another branch gets an offer to merge it first.
@@ -294,6 +294,7 @@ Blink can manage several projects. Each one only has the capabilities whose bloc
 ```json
 {
   "allowedSlackUserId": "U0123456789",
+  "autonomy": "none",
   "models": { "jev": "jev-1.13.0", "openai": "gpt-6-luna" },
   "projects": [
     {
@@ -324,6 +325,7 @@ Blink can manage several projects. Each one only has the capabilities whose bloc
 | Setting | Required | What it is |
 |---|---|---|
 | `allowedSlackUserId` | yes | The Slack user Blink listens to (profile → ⋯ → Copy member ID), or a list of them |
+| `autonomy` | no | Which actions run without Confirm. `none` (default): every action asks. `partial`: only releases (OTA, TestFlight, Android) ask; merges, rollbacks and stop/resume rollout run right away. `full`: nothing asks. Actions OpenAI proposes always ask. |
 | `models.jev` / `models.openai` | no | Defaults `jev-1.13.0` (pinned, because the confidence threshold is tuned per model) and `gpt-6-luna` |
 | `projects[].id` | yes | Short, unique, lowercase |
 | `projects[].name`, `aliases` | no | How you refer to the project in messages. The id and name always count. |
@@ -343,7 +345,7 @@ Blink checks the file on startup and lists every problem it finds. To use a diff
 ### Which project a message is about
 1. **The channel:** a channel listed in a project's `slackChannels`.
 2. **The message:** a project's id, name or alias appears in it (_"release myapp to TestFlight"_).
-3. **The thread:** follow-ups stay on the thread's project, as long as it can do what you asked.
+3. **The thread:** follow-ups stay on the thread's project (the last one named in the thread, even before Blink was mentioned), as long as it can do what you asked or the request is unclear.
 4. **What the request needs:** if only one project can do it, that's the one. With one Expo app and one PostHog-only project, _"release to TestFlight"_ goes to the Expo app and _"how many signups this week?"_ to the PostHog project.
 5. **Otherwise Blink asks**, with a button per project (e.g. a merge when several projects have GitHub). With only one project configured, it never asks.
 

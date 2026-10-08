@@ -1,5 +1,6 @@
 {
   "allowedSlackUserId": "U0123456789",
+  "autonomy": "none",
   "models": {
     "jev": "jev-1.13.0",
     "openai": "gpt-6-luna"

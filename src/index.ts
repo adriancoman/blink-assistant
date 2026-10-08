@@ -4,9 +4,9 @@ import { type Action, describe, execute } from "./actions.ts";
 import { type AgentResult, classifyIntent, respond } from "./agent.ts";
 import { config } from "./config.ts";
 import { askOpenAI, fallbackAvailable } from "./fallback.ts";
-import { pickByCapability, resolveProject } from "./projects.ts";
+import { namedInThread, pickByCapability, resolveProject } from "./projects.ts";
 import * as replies from "./replies.ts";
-import { hasExpo, type Project } from "./settings.ts";
+import { hasExpo, needsConfirm, type Project } from "./settings.ts";
 import { watchRun } from "./watch.ts";
 
 const app = new App({ token: config.slackBotToken, appToken: config.slackAppToken, socketMode: true });
@@ -52,7 +52,21 @@ async function channelName(channel: string): Promise<string | null> {
   return name;
 }
 
+// Earlier messages in a thread the bot hasn't seen yet: it was mentioned partway through, or restarted.
+async function earlierInSlackThread(channel: string, threadTs: string, messageTs: string): Promise<string[]> {
+  try {
+    const { messages = [] } = await app.client.conversations.replies({ channel, ts: threadTs, limit: 50 });
+    return messages.filter((m) => m.ts !== messageTs && m.text).map((m) => m.text!);
+  } catch (err) {
+    console.warn(`Couldn't read thread ${threadTs}:`, err instanceof Error ? err.message : err);
+    return [];
+  }
+}
+
 type Reply = (message: string, blocks?: object[]) => Promise<unknown>;
+
+// Links in replies (like Expo workflow runs) stay plain links, without Slack's preview cards.
+const noPreviews = { unfurl_links: false, unfurl_media: false };
 
 const buttons = (...elements: object[]) => ({ type: "actions", elements });
 const button = (text: string, actionId: string, value: string, primary = false) => ({
@@ -63,9 +77,47 @@ const button = (text: string, actionId: string, value: string, primary = false) 
   ...(primary ? { style: "primary" } : {}),
 });
 
-// Posts a result: the reply text (with an "Ask OpenAI" button when Jev couldn't route the request)
-// and a Confirm / Cancel card per proposed action.
-async function postResult(reply: Reply, p: Project, result: AgentResult, messages: string[]) {
+// Where an action runs from: its thread, and who asked (mentioned when a watched run finishes).
+type Origin = { channel: string; threadTs: string; userId: string };
+
+// Runs an action, showing progress in one message: ⏳, then ✅ or ❌. `show` replaces that message.
+async function runAction(p: Project, action: Action, origin: Origin, show: (text: string) => Promise<unknown>) {
+  const summary = `${label(p)}${describe(p, action)}`;
+  await show(`⏳ ${summary}`);
+  try {
+    const result = await execute(p, action);
+    await show(`✅ ${label(p)}${result.text}`);
+    if (result.watch && hasExpo(p)) {
+      // Reply in the same thread and mention the user, so the result shows up as a notification.
+      watchRun(p, result.watch, (message) =>
+        app.client.chat.postMessage({
+          channel: origin.channel,
+          thread_ts: origin.threadTs,
+          text: `<@${origin.userId}> ${label(p)}${message}`,
+          ...noPreviews,
+        }),
+      );
+    }
+  } catch (err) {
+    console.error(err);
+    await show(`❌ ${summary}\n\`${String(err)}\``);
+  }
+}
+
+// Posts a ⏳ message and runs the action in it, for actions the autonomy setting lets run unconfirmed.
+async function runNow(p: Project, action: Action, origin: Origin) {
+  const { channel, threadTs } = origin;
+  let ts: string | undefined;
+  await runAction(p, action, origin, async (text) => {
+    if (ts) return app.client.chat.update({ channel, ts, text });
+    ts = (await app.client.chat.postMessage({ channel, thread_ts: threadTs, text, ...noPreviews })).ts;
+  });
+}
+
+// Posts a result: the reply text (with an "Ask OpenAI" button when Jev couldn't route the request),
+// then each proposed action: run right away if the autonomy setting allows, else a Confirm / Cancel card.
+// `confirmAll` asks for every action regardless of the setting.
+async function postResult(reply: Reply, p: Project, result: AgentResult, messages: string[], origin: Origin, confirmAll = false) {
   const text = result.text ? `${label(p)}${result.text}` : "";
   if (result.notUnderstood && fallbackAvailable) {
     const id = randomUUID();
@@ -78,6 +130,10 @@ async function postResult(reply: Reply, p: Project, result: AgentResult, message
     await reply(text);
   }
   for (const action of result.actions) {
+    if (!confirmAll && !needsConfirm(config.autonomy, action.kind)) {
+      await runNow(p, action, origin);
+      continue;
+    }
     const id = randomUUID();
     pending.set(id, { projectId: p.id, action, createdAt: Date.now() });
     const summary = `${label(p)}${describe(p, action)}`;
@@ -91,17 +147,17 @@ async function postResult(reply: Reply, p: Project, result: AgentResult, message
 type Request = { channel: string; threadTs: string; messageTs: string; user?: string; text: string };
 
 const replyIn = (channel: string, threadTs: string): Reply => (message, blocks) =>
-  app.client.chat.postMessage({ channel, thread_ts: threadTs, text: message, blocks: blocks as never });
+  app.client.chat.postMessage({ channel, thread_ts: threadTs, text: message, blocks: blocks as never, ...noPreviews });
 
 // Runs a request once its project is known.
 async function handleFor(p: Project, request: Request, thread: Thread) {
-  const { channel, threadTs, messageTs, text } = request;
+  const { channel, threadTs, messageTs, user, text } = request;
   const reply = replyIn(channel, threadTs);
   thread.projectId = p.id;
   try {
     const progress = (note: string) => reply(`${label(p)}${note}`);
     const result = await respond(p, thread.messages, text, { threadKey: `${channel}:${threadTs}`, progress });
-    await postResult(reply, p, result, thread.messages.slice(-5));
+    await postResult(reply, p, result, thread.messages.slice(-5), { channel, threadTs, userId: user ?? "" });
     await react("remove", channel, messageTs, WORKING);
   } catch (err) {
     console.error(err);
@@ -120,12 +176,18 @@ async function handle(request: Request) {
     return;
   }
 
-  const thread = threads.get(threadTs) ?? { projectId: null, messages: [] };
+  const known = threads.get(threadTs);
+  const thread = known ?? { projectId: null, messages: [] };
   threads.set(threadTs, thread);
-  thread.messages.push(text);
   await react("add", channel, messageTs, WORKING);
 
   try {
+    // A project named earlier in the thread counts as the thread's project.
+    if (!thread.projectId) {
+      const earlier = known ? thread.messages : threadTs !== messageTs ? await earlierInSlackThread(channel, threadTs, messageTs) : [];
+      thread.projectId = namedInThread(config.projects, earlier)?.id ?? null;
+    }
+    thread.messages.push(text);
     const resolution = resolveProject({
       projects: config.projects,
       channelId: channel,
@@ -239,20 +301,7 @@ async function resolveButton(body: BlockAction, action: ButtonAction, run: boole
     return;
   }
 
-  await ctx.update(`⏳ ${summary}`);
-  try {
-    const result = await execute(p, entry.action);
-    await ctx.update(`✅ ${label(p)}${result.text}`);
-    if (result.watch && hasExpo(p)) {
-      // Reply in the same thread and mention the user, so the result shows up as a notification.
-      watchRun(p, result.watch, (message) =>
-        app.client.chat.postMessage({ channel: ctx.channel, thread_ts: ctx.threadTs, text: `<@${body.user.id}> ${label(p)}${message}` }),
-      );
-    }
-  } catch (err) {
-    console.error(err);
-    await ctx.update(`❌ ${summary}\n\`${String(err)}\``);
-  }
+  await runAction(p, entry.action, { channel: ctx.channel, threadTs: ctx.threadTs, userId: body.user.id }, ctx.update);
 }
 
 app.action<BlockAction<ButtonAction>>("confirm", async ({ ack, body, action }) => {
@@ -282,7 +331,8 @@ app.action<BlockAction<ButtonAction>>("ask_openai", async ({ ack, body, action }
     const result = await askOpenAI(p, entry.messages);
     await ctx.update("🤖 Asked OpenAI:");
     // OpenAI's reply is shown as-is; any action it proposes still needs Confirm.
-    await postResult(replyIn(ctx.channel, ctx.threadTs), p, { text: result.text, actions: result.actions }, entry.messages);
+    const origin = { channel: ctx.channel, threadTs: ctx.threadTs, userId: body.user.id };
+    await postResult(replyIn(ctx.channel, ctx.threadTs), p, { text: result.text, actions: result.actions }, entry.messages, origin, true);
   } catch (err) {
     console.error(err);
     await ctx.update(`❌ OpenAI couldn't help: \`${String(err)}\``);
