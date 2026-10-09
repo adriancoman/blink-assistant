@@ -1,5 +1,6 @@
+import { supports } from "./capabilities/index.ts";
 import { mentioned } from "./parsing.ts";
-import type { Project } from "./settings.ts";
+import type { Project } from "./project.ts";
 
 // Which project a message is about, in order: the Slack channel, a project named in the message,
 // the only project there is. Otherwise the caller decides with pickByCapability (the thread's
@@ -41,26 +42,11 @@ export function namedInThread(projects: Project[], messages: string[]): Project 
   return null;
 }
 
-// Commands and what a project needs to run them. Used when nothing else names the project.
-const SUPPORTS: Record<string, (p: Project) => boolean> = {
-  merge: (p) => Boolean(p.github),
-  release_ota: (p) => Boolean(p.github && p.expo?.workflows.ota),
-  release_testflight: (p) => Boolean(p.github && p.expo?.workflows.testflight),
-  release_android: (p) => Boolean(p.github && p.expo?.workflows.android),
-  rollback_ota: (p) => Boolean(p.github && p.expo),
-  stop_rollout: (p) => Boolean(p.github && p.expo),
-  resume_rollout: (p) => Boolean(p.github && p.expo),
-  status: (p) => Boolean(p.github && p.expo),
-  explain_failure: (p) => Boolean(p.github && p.expo),
-  app_store_release: (p) => Boolean(p.github && p.expo),
-  analytics: (p) => Boolean(p.posthog),
-};
-
-export const supports = (p: Project, intent: string) => SUPPORTS[intent]?.(p) ?? false;
-
 // Picks the project from what the request needs: the thread's project if it can do it, otherwise
 // the only project that can. The thread's project also wins when the request is unclear or nothing
 // can do it, so it gets to answer (help, "not set up"). Null means it's still ambiguous, so ask.
+export { supports };
+
 export function pickByCapability(candidates: Project[], intent: string | null, threadProjectId: string | null): Project | null {
   const thread = candidates.find((p) => p.id === threadProjectId) ?? null;
   if (!intent) return thread;

@@ -1,6 +1,6 @@
 import { easJson } from "./expo.ts";
 import { eas, withRepo } from "./repo.ts";
-import type { ExpoProject } from "./settings.ts";
+import type { ExpoProject } from "./project.ts";
 
 // OTA controls for a project's OTA channel: pause/resume delivery, cancel a publish that hasn't
 // happened yet, and roll back. None of these upload code, so the clone only needs to exist.

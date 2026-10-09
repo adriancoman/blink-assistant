@@ -1,42 +1,9 @@
 import type { LastFailure, LastRun, RunFailure } from "./expo.ts";
+import type { LocalJob } from "./localbuild.ts";
 import { excerpt } from "./logs.ts";
-import type { Project } from "./settings.ts";
+import type { Project } from "./project.ts";
 
-// Jev only makes decisions, so every reply is a template.
-
-// What a project supports, as lines for the help reply. Only configured capabilities show up.
-function capabilities(p: Project): string[] {
-  const lines: string[] = [];
-  const branch = p.github?.releaseBranch ?? "release";
-  const example = branch === "main" ? `merge my-feature into main` : `merge main into ${branch}`;
-  if (p.github) lines.push(`• *merge* one branch into another (e.g. _${example}_)`);
-  if (p.github && p.expo) {
-    if (p.expo.workflows.ota) lines.push(`• *release an OTA* update to ${p.expo.otaChannel}`);
-    lines.push(`• *roll back the OTA*, *stop rollout* (pause OTA delivery), *resume rollout*`);
-    if (p.expo.workflows.testflight) {
-      lines.push(`• *release to TestFlight*${p.expo.versioning !== "none" ? " (optionally with a version, e.g. _ship 1.1.0 to TestFlight_)" : ""}`);
-    }
-    if (p.expo.workflows.android) lines.push(`• *release Android* (build and upload to Google Play)`);
-    lines.push(`• show *status*, or *why the last build failed*`);
-  }
-  if (p.posthog) lines.push(`• answer *analytics questions* with PostHog AI (e.g. _how many signups this week?_)`);
-  return lines;
-}
-
-export const help = (p: Project, prefix = "") => {
-  const lines = capabilities(p);
-  if (!lines.length) return `${prefix}Nothing I can do for *${p.name}* is set up yet.`;
-  return `${prefix}For *${p.name}* I can:\n${lines.join("\n")}`;
-};
-
-// For "what can you do?" when no project is in play: one section per project.
-export const helpAll = (projects: Project[]) =>
-  projects.map((p) => help(p)).join("\n\n") +
-  (projects.length > 1 ? "\n\nName the project in your message (or use its channel) if it isn't obvious from the request." : "");
-
-export const notUnderstood = (p: Project) => help(p, "Sorry, I'm not sure what you mean. ");
-
-export const notConfigured = (p: Project, what: string) => `${what} isn't set up for *${p.name}*. ${help(p)}`;
+// Jev only makes decisions, so every reply is a template. Help replies are in help.ts.
 
 export const posthogFailed = (err: unknown) => `:warning: ${err instanceof Error ? err.message : String(err)}`;
 
@@ -85,10 +52,19 @@ function runSummary(run: LastRun) {
   return `${runEmoji[run.status] ?? "•"} *${run.workflow}* ${runVerb[run.status] ?? run.status.toLowerCase()}${failedAt}${version}${timing}`;
 }
 
+const runLink = (run: LastRun) => `<${run.url}|${run.urlLabel ?? "View run"}>`;
+
 export function status(p: Project, run: LastRun | null, paused = false) {
   if (!run) return `No builds yet.${paused ? pausedNote(p) : ""}`;
-  return `${runSummary(run)}\n<${run.url}|View run>${paused ? pausedNote(p) : ""}`;
+  return `${runSummary(run)}\n${runLink(run)}${paused ? pausedNote(p) : ""}`;
 }
+
+// After a cloud build was refused for the month's quota, with a Confirm card for building here.
+export const quotaSpent = () => "\n\nEAS has used up this month's free iOS builds. I can build on this Mac instead:";
+
+// A build on this machine that Blink lost track of, because it restarted while the build was running.
+export const localBuildLost = (job: LocalJob) =>
+  `⚠️ Blink restarted while the local iOS build was running, so the build didn't finish. Ask for it again. Log: \`${job.logPath}\``;
 
 // Small enough that a reply with an OpenAI button stays under Slack's 3000-character section limit.
 export const SLACK_LOG_LINES = 15;
@@ -108,14 +84,14 @@ export function failedRun(run: LastRun, failure: RunFailure | null) {
   const detail = failure
     ? `\nFailed step: *${failure.step}*${run.failedJobs.length > 1 ? ` (in ${failure.job})` : ""}${log}`
     : "\nI couldn't find the error in the logs.";
-  return `${runSummary(run)}${detail}\n<${run.url}|View run>`;
+  return `${runSummary(run)}${detail}\n${runLink(run)}`;
 }
 
 // For "why did it fail?". When the latest run didn't fail, it says so and shows the last one that did.
 export function lastFailure({ latest, failed, failure, fromThread }: LastFailure) {
   if (!failed) {
     if (!latest) return "No builds yet.";
-    return `${fromThread ? "This thread's run hasn't failed:" : "No workflow run has failed. The latest:"}\n${runSummary(latest)}\n<${latest.url}|View run>`;
+    return `${fromThread ? "This thread's run hasn't failed:" : "No workflow run has failed. The latest:"}\n${runSummary(latest)}\n${runLink(latest)}`;
   }
   const note = latest && latest.id !== failed.id ? `The latest run, *${latest.workflow}*, ${runVerb[latest.status] ?? latest.status.toLowerCase()}. The last one that failed:\n` : "";
   return `${note}${failedRun(failed, failure)}`;

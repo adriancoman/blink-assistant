@@ -1,6 +1,6 @@
 import { builtStoreVersions } from "./expo.ts";
 import { readFile } from "./github.ts";
-import type { ExpoProject } from "./settings.ts";
+import type { ExpoProject } from "./project.ts";
 import { chooseMinorVersion, chooseVersion, countOta, readAppJsonVersion, type VersionPlan } from "./versioning.ts";
 
 export async function liveAppStoreVersion(p: ExpoProject): Promise<string> {

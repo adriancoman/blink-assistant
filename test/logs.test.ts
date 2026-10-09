@@ -1,6 +1,50 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { excerpt, failureInLogs, type JobLogs } from "../src/logs.ts";
+import { excerpt, failureInLogs, type JobLogs, LOCAL_STEP_HEADER, parseLocalBuildLog, quotaExceeded } from "../src/logs.ts";
+
+describe("a cloud build refused for the month's quota", () => {
+  it("is recognized from EAS's message, and nothing else", () => {
+    assert.ok(quotaExceeded(["Build request failed.", "This account has used its iOS builds from the Free plan this month."]));
+    assert.ok(quotaExceeded(["Error: This account has used its builds from the free plan this month"]));
+    assert.ok(!quotaExceeded(["Build failed: xcodebuild exited with code 65"]));
+    assert.ok(!quotaExceeded([]));
+  });
+});
+
+describe("a local build's log", () => {
+  const log = [
+    `${LOCAL_STEP_HEADER}eas build (local)`,
+    "\u001b[32m✔\u001b[39m Incremented buildNumber from \u001b[1m41\u001b[22m to \u001b[1m42\u001b[22m.",
+    "Building project",
+    "",
+    "[12:01:05]: fastlane gym finished",
+    `${LOCAL_STEP_HEADER}eas submit`,
+    "Scheduling iOS submission",
+    "- When it's done, you can see your build here: https://appstoreconnect.apple.com/apps/1459746036/testflight/ios",
+    "",
+  ].join("\n");
+
+  it("splits into the two commands, without color codes, timestamps or blank lines", () => {
+    const parsed = parseLocalBuildLog(log);
+    assert.deepEqual(
+      parsed.steps.map((s) => s.step),
+      ["eas build (local)", "eas submit"],
+    );
+    assert.deepEqual(parsed.steps[0].lines, ["✔ Incremented buildNumber from 41 to 42.", "Building project", "fastlane gym finished"]);
+    assert.equal(parsed.steps[1].lines.length, 2);
+  });
+
+  it("finds the build number EAS assigned and the TestFlight page", () => {
+    const parsed = parseLocalBuildLog(log);
+    assert.equal(parsed.buildNumber, "42");
+    assert.equal(parsed.testflightUrl, "https://appstoreconnect.apple.com/apps/1459746036/testflight/ios");
+  });
+
+  it("copes with an empty log and lines before the first command", () => {
+    assert.deepEqual(parseLocalBuildLog(""), { steps: [], buildNumber: null, testflightUrl: null });
+    assert.deepEqual(parseLocalBuildLog("stray line\n").steps, []);
+  });
+});
 
 // Shaped like `eas workflow:logs <jobId> --json` output from real failed runs.
 const shellExit = (step: string) => ({

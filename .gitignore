@@ -1,15 +1,21 @@
 node_modules/
 .idea/
-.repo/
 
 # Secrets: ignore every .env variant, keep the template
 .env
 .env.*
 !.env.example
 
-# Local settings (copy release-bot.config.example.json)
-release-bot.config.json
+# Local settings (copy blink.config.example.json)
+blink.config.json
 .repos/
+
+# Logs and .ipa files of builds made on this machine
+.builds/
+
+# What the bot remembers between restarts
+blink.state.json
+blink.state.json.*
 
 # Local tool folders
 .claude/

@@ -1,6 +1,7 @@
+import { isLocalJobId, localOutcome } from "./localbuild.ts";
 import { failureInLogs, type JobLogs } from "./logs.ts";
 import { eas, ensureRepo, syncRepo, withRepo } from "./repo.ts";
-import type { ExpoProject } from "./settings.ts";
+import type { ExpoProject } from "./project.ts";
 
 export type StartedRun = { id: string; url: string };
 
@@ -25,6 +26,9 @@ export type LastRun = {
   startedAt: string | null;
   finishedAt: string | null;
   url: string;
+  // What the link is called in replies; "View run" when absent. A local build links to its log or
+  // to TestFlight.
+  urlLabel?: string;
   failedJobs: { id: string; name: string }[];
   version: string | null;
   buildNumber: string | null;
@@ -96,6 +100,12 @@ export async function runFailure(p: ExpoProject, run: LastRun): Promise<RunFailu
 export type LastFailure = { latest: LastRun | null; failed: LastRun | null; failure: RunFailure | null; fromThread: boolean };
 
 export async function lastFailure(p: ExpoProject, threadRunId: string | null = null): Promise<LastFailure> {
+  if (threadRunId && isLocalJobId(threadRunId)) {
+    // A build on this machine: its result file, written when it finished (null while it's running).
+    const outcome = localOutcome(p, threadRunId);
+    const failed = outcome?.run.status === "FAILURE" ? outcome.run : null;
+    return { latest: outcome?.run ?? null, failed, failure: failed ? outcome!.failure : null, fromThread: true };
+  }
   if (threadRunId) {
     const run = await runDetails(p, threadRunId);
     const failed = run.status === "FAILURE" ? run : null;

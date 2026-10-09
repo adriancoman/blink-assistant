@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { LastRun } from "../src/expo.ts";
-import { failedRun, help, lastFailure, status } from "../src/replies.ts";
+import { help } from "../src/help.ts";
+import { failedRun, lastFailure, status } from "../src/replies.ts";
 import type { Project } from "../src/settings.ts";
 
 const app = (android: string | null): Project => ({
@@ -10,7 +11,7 @@ const app = (android: string | null): Project => ({
   aliases: ["myapp"],
   slackChannels: [],
   github: { owner: "a", repo: "myapp", releaseBranch: "release" },
-  expo: { iosBundleId: "x", otaChannel: "production", workflows: { ota: "ota.yml", testflight: "tf.yml", android }, token: "t", versioning: "app-json", repoDir: "r" },
+  expo: { iosBundleId: "x", otaChannel: "production", workflows: { ota: "ota.yml", testflight: "tf.yml", android }, token: "t", versioning: "app-json", repoDir: "r", installScripts: false, localBuild: null },
 });
 
 describe("help", () => {
@@ -64,6 +65,13 @@ describe("failedRun", () => {
 
   it("says so when the logs don't show the error", () => {
     assert.match(failedRun(run(), null), /couldn't find the error in the logs/);
+  });
+
+  it("names the link the way the run asks, for builds on this Mac", () => {
+    const local = run({ workflow: "Local iOS build", url: "file:///b/build.log", urlLabel: "Open log", failedJobs: [{ id: "l", name: "eas submit" }] });
+    assert.match(failedRun(local, { job: "eas submit", step: "eas submit", lines: ["Error: bad key"] }), /failed at \*eas submit\*.*\n<file:\/\/\/b\/build\.log\|Open log>$/s);
+    const done = run({ workflow: "Local iOS build", status: "SUCCESS", url: "https://appstoreconnect.apple.com/apps/1/testflight/ios", urlLabel: "Open TestFlight", failedJobs: [], version: "4.1.0", buildNumber: "42" });
+    assert.match(status(app(null), done), /✅ \*Local iOS build\* succeeded · 4\.1\.0 \(build 42\)\n<https:\/\/appstoreconnect.*\|Open TestFlight>$/);
   });
 });
 

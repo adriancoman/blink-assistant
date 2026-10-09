@@ -27,6 +27,7 @@ function stepName(key: string, lines: LogLine[]): string {
 
 // Color codes, and the timestamps fastlane puts on every line.
 const noise = /\u001b\[[0-9;]*m|^\[\d\d:\d\d:\d\d\]: /g;
+export const stripNoise = (line: string) => line.replace(noise, "").trimEnd();
 
 // The first step that failed, and its log lines without markers, color codes, stack frames or the
 // shell wrapper's error.
@@ -42,6 +43,37 @@ export function failureInLogs(logs: JobLogs): StepFailure | null {
       .map((l) => l.msg!.replace(noise, "").trimEnd())
       .filter((msg) => msg.trim() && !stackFrame.test(msg) && !scriptExited.test(msg)),
   };
+}
+
+// EAS refusing a cloud build because the account's free-plan builds for the month are spent.
+// The message is EAS's; it shows up in the failed build job's log.
+export const quotaExceeded = (lines: string[]) => lines.some((l) => /builds? from the Free plan/i.test(l));
+
+// A local build's log (`eas build --local`, then `eas submit`), written by localbuild.ts as one file
+// with a header line before each command. Parsed into the steps, the build number EAS assigned, and
+// the TestFlight page eas submit prints.
+export const LOCAL_STEP_HEADER = "### ";
+
+export type LocalBuildLog = {
+  steps: { step: string; lines: string[] }[];
+  buildNumber: string | null;
+  testflightUrl: string | null;
+};
+
+export function parseLocalBuildLog(text: string): LocalBuildLog {
+  const steps: LocalBuildLog["steps"] = [];
+  for (const raw of text.split("\n")) {
+    if (raw.startsWith(LOCAL_STEP_HEADER)) {
+      steps.push({ step: raw.slice(LOCAL_STEP_HEADER.length).trim(), lines: [] });
+      continue;
+    }
+    const line = stripNoise(raw);
+    if (line.trim() && steps.length) steps[steps.length - 1].lines.push(line);
+  }
+  const all = steps.flatMap((s) => s.lines);
+  const buildNumber = all.map((l) => l.match(/Incremented buildNumber from \S+ to (\d+)/)?.[1]).find(Boolean) ?? null;
+  const testflightUrl = all.map((l) => l.match(/https:\/\/appstoreconnect\.apple\.com\/apps\/\d+\/testflight\/ios/)?.[0]).find(Boolean) ?? null;
+  return { steps, buildNumber, testflightUrl };
 }
 
 // An unindented line that names an error, like "Error: spawnSync eas ENOENT" (not "    throw error;").

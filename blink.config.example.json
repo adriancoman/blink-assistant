@@ -1,6 +1,10 @@
 {
   "allowedSlackUserId": "U0123456789",
   "autonomy": "none",
+  "retention": {
+    "threadDays": 7,
+    "confirmMinutes": 30
+  },
   "models": {
     "jev": "jev-1.13.0",
     "openai": "gpt-6-luna"
@@ -28,7 +32,8 @@
           "android": "build-android.yml"
         },
         "tokenEnv": "EXPO_TOKEN",
-        "versioning": "app-json"
+        "versioning": "app-json",
+        "localBuild": false
       }
     },
     {

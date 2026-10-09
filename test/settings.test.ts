@@ -20,6 +20,7 @@ describe("parseConfig", () => {
     assert.deepEqual(config.allowedUserIds, ["U1"]);
     assert.equal(config.autonomy, "none");
     assert.deepEqual(config.models, { jev: "jev-1.13.0", openai: "gpt-6-luna" });
+    assert.deepEqual(config.retention, { threadDays: 7, confirmMinutes: 30 });
     assert.deepEqual(p.github, { owner: "acme", repo: "myapp-mobile", releaseBranch: "release" });
     assert.deepEqual(p.expo, {
       iosBundleId: "com.acme.myapp",
@@ -28,6 +29,8 @@ describe("parseConfig", () => {
       token: "expo",
       versioning: "app-json",
       repoDir: ".repos/myapp",
+      installScripts: false,
+      localBuild: null,
     });
     assert.deepEqual(p.aliases, ["myapp", "MyApp", "my cool app"]);
     assert.ok(hasExpo(p));
@@ -106,6 +109,15 @@ describe("parseConfig", () => {
 
   it("requires the Expo token secret", () => {
     assert.throws(() => parseConfig({ allowedSlackUserId: "U1", projects: [myapp] }, {}), /EXPO_TOKEN/);
+  });
+});
+
+describe("retention", () => {
+  it("overrides one value at a time and rejects bad ones", () => {
+    const base = { allowedSlackUserId: "U1", projects: [myapp] };
+    assert.deepEqual(parseConfig({ ...base, retention: { threadDays: 30 } }, env).retention, { threadDays: 30, confirmMinutes: 30 });
+    assert.throws(() => parseConfig({ ...base, retention: { confirmMinutes: 0 } }, env), /"retention.confirmMinutes" must be a positive number/);
+    assert.throws(() => parseConfig({ ...base, retention: { threadDays: "7" } }, env), /"retention.threadDays" must be/);
   });
 });
 

@@ -66,7 +66,7 @@ describe("pickByCapability", () => {
   const app: Project = {
     ...project("myapp", "MyApp"),
     github: { owner: "a", repo: "myapp", releaseBranch: "release" },
-    expo: { iosBundleId: "x", otaChannel: "production", workflows: { ota: "ota.yml", testflight: "tf.yml", android: null }, token: "t", versioning: "app-json", repoDir: "r" },
+    expo: { iosBundleId: "x", otaChannel: "production", workflows: { ota: "ota.yml", testflight: "tf.yml", android: null }, token: "t", versioning: "app-json", repoDir: "r", installScripts: false, localBuild: null },
   };
   const gems: Project = {
     ...project("pmgems", "PMGems"),

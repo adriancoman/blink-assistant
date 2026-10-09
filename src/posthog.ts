@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import type { PosthogSettings, Project } from "./settings.ts";
+import type { PosthogSettings, Project } from "./project.ts";
 
 // Questions go to PostHog AI, which answers from the project's own PostHog data. It's read-only.
 // Answers take tens of seconds, since PostHog AI runs queries before it replies.
@@ -9,7 +9,8 @@ const TIMEOUT_MS = 3 * 60 * 1000;
 const POLL_MS = 5000;
 
 // One PostHog AI conversation per Slack thread and project, so follow-ups keep their context.
-const conversations = new Map<string, string>();
+// The caller keeps the IDs (they survive restarts in the bot's state file).
+export type Conversations = { get(key: string): string | undefined; set(key: string, id: string): void };
 
 type StreamMessage = { type?: string; content?: unknown; tool_calls?: unknown[] };
 
@@ -126,7 +127,7 @@ export async function askPosthogAI(posthog: PosthogSettings, question: string, c
 }
 
 // Asks within the thread's ongoing PostHog AI conversation for this project, starting one if needed.
-export async function askInThread(p: Project & { posthog: PosthogSettings }, threadKey: string, question: string): Promise<string> {
+export async function askInThread(p: Project & { posthog: PosthogSettings }, threadKey: string, question: string, conversations: Conversations): Promise<string> {
   const key = `${threadKey}:${p.id}`;
   const conversationId = conversations.get(key) ?? randomUUID();
   conversations.set(key, conversationId);
